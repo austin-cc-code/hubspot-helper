@@ -146,6 +146,278 @@ Improved engagement metrics: Bounce rate ↓, Open rate ↑
 Generate action plan? [y/N]
 ```
 
+#### 6. HubSpot Feature Utilization Analysis
+Identifies underutilized HubSpot features and recommends optimizations to get more value from your subscription:
+
+- **Unused Features**: Detect HubSpot features you're paying for but not using
+- **Underutilized Features**: Find features used minimally that could provide more value
+- **Feature Recommendations**: AI suggests features that would benefit your operations
+- **ROI Optimization**: Maximize value from your HubSpot subscription
+
+**Example Output:**
+```
+HubSpot Feature Utilization Report
+
+Subscription Analysis:
+├─ Plan: Marketing Hub Professional ($800/month)
+├─ Available features: 47
+├─ Features in use: 23 (49%)
+└─ ⚠️  Not leveraging $392/month in potential value
+
+Unused Features (High Value):
+├─ 📊 Custom Reports & Dashboards
+│  ├─ Status: Never used
+│  ├─ Potential value: Track conversion metrics, ROI, campaign performance
+│  └─ AI Recommendation: Create 3 starter dashboards for marketing team
+│
+├─ 🎯 Lead Scoring
+│  ├─ Status: Not configured
+│  ├─ Potential value: Prioritize high-quality leads automatically
+│  └─ AI Recommendation: Set up basic lead scoring based on engagement
+│
+├─ 🔄 Sequences (Sales Hub)
+│  ├─ Status: 0 sequences created
+│  ├─ Potential value: Automate follow-up, increase response rates
+│  └─ AI Recommendation: Create 2 sequences for common outreach scenarios
+│
+└─ 📧 A/B Testing (Email)
+   ├─ Status: Never used
+   ├─ Potential value: Optimize email performance by 15-30%
+   └─ AI Recommendation: Start with subject line tests on next campaign
+
+Underutilized Features:
+├─ 📝 Smart Content
+│  ├─ Current usage: 2 smart modules created
+│  ├─ Opportunity: Personalize web pages based on lifecycle stage
+│  └─ AI Recommendation: Add smart CTAs to 5 high-traffic pages
+│
+├─ 🎨 CTAs (Call-to-Actions)
+│  ├─ Current usage: 4 CTAs created, but static (not smart)
+│  ├─ Opportunity: Show different CTAs based on contact properties
+│  └─ AI Recommendation: Convert to smart CTAs with 3 variants each
+│
+└─ 🔗 Attribution Reporting
+   ├─ Current usage: Default attribution only
+   ├─ Opportunity: Understand full customer journey, optimize spend
+   └─ AI Recommendation: Enable multi-touch attribution for better insights
+
+Features You Should Be Using (Based on Centercode Context):
+├─ 👥 Account-Based Marketing (ABM)
+│  ├─ Why: Your ICP includes enterprise accounts with multiple decision-makers
+│  ├─ Current: Treating accounts as individual contacts
+│  └─ Recommendation: Enable ABM tools, create target account lists
+│
+├─ 📋 Deal Pipelines (Custom)
+│  ├─ Why: Software testing platform likely has unique sales stages
+│  ├─ Current: Using default pipeline
+│  └─ Recommendation: Create custom pipeline matching your sales process
+│
+└─ 🔌 Custom Objects
+   ├─ Why: Could track "Testing Projects" or "Beta Programs" as objects
+   ├─ Current: Not using custom objects
+   └─ Recommendation: Create custom object for better relationship mapping
+
+Configuration Recommendations:
+├─ 🎯 Forms: Add progressive profiling to reduce form friction
+├─ 📧 Email Templates: Create branded templates (0 currently exist)
+├─ 🤖 Chatbots: Set up bot for common questions (feature available but unused)
+└─ 📱 Mobile App: Enable mobile notifications for sales team
+
+Estimated Impact:
+├─ Time saved: ~8 hours/week through automation
+├─ Lead quality: +25% through lead scoring and ABM
+├─ Conversion rate: +15% through smart content and A/B testing
+├─ Better ROI: Getting $800/month value instead of $408/month
+
+Generate implementation plan for top 3 features? [y/N]
+```
+
+**AI Context Integration:**
+The tool uses your configuration file (company info, ICP, industry) to make context-aware recommendations. For example, knowing you're Centercode (B2B SaaS, user testing platform) helps suggest ABM features instead of B2C marketing tools.
+
+---
+
+## Configuration System
+
+The tool uses a configuration file to provide personalized, context-aware recommendations and analysis.
+
+### Configuration File Structure
+
+**Location**: `~/.hubspot-audit/config.yaml` or `./hubspot-audit.config.yaml`
+
+**Example Configuration:**
+```yaml
+# Company Information
+company:
+  name: "Centercode"
+  industry: "Software Testing & Quality Assurance"
+  business_model: "B2B SaaS"
+  website: "https://centercode.com"
+
+# Ideal Customer Profile (ICP)
+icp:
+  company_size:
+    - "50-500 employees"
+    - "500-1000 employees"
+  industries:
+    - "Software Development"
+    - "Technology"
+    - "SaaS Companies"
+  job_titles:
+    - "Product Manager"
+    - "QA Manager"
+    - "Director of Product"
+    - "VP of Engineering"
+  decision_makers:
+    - "Chief Product Officer"
+    - "VP of Engineering"
+    - "Director of Quality"
+
+# Product/Service Information
+products:
+  - name: "User Testing Platform"
+    description: "Comprehensive beta testing and feedback management"
+  - name: "Community Management"
+    description: "Tools for managing tester communities"
+
+# Sales Process
+sales:
+  avg_deal_size: "$50,000"
+  sales_cycle: "60-90 days"
+  key_stages:
+    - "Initial Consultation"
+    - "Product Demo"
+    - "Technical Evaluation"
+    - "Proposal & Negotiation"
+    - "Closed Won"
+
+# Marketing Strategy
+marketing:
+  primary_channels:
+    - "Content Marketing"
+    - "Webinars"
+    - "Trade Shows"
+    - "Partner Referrals"
+  target_metrics:
+    - "MQL to SQL conversion: >40%"
+    - "Email open rate: >25%"
+    - "Lead response time: <2 hours"
+
+# Team Structure
+team:
+  marketing_team_size: 5
+  sales_team_size: 8
+  uses_sales_sequences: true
+  uses_marketing_automation: true
+
+# Compliance & Data
+compliance:
+  regions: ["US", "EU"]
+  gdpr_compliant: true
+  data_retention_policy: "3 years for inactive contacts"
+
+# Custom Rules & Preferences
+rules:
+  # Property standardization
+  industry_mapping:
+    "Tech": "Technology"
+    "IT": "Technology"
+    "Software": "Technology"
+
+  # Contact quality thresholds
+  minimum_contact_fields:
+    - "email"
+    - "firstname"
+    - "lastname"
+    - "company"
+    - "jobtitle"
+
+  # Marketing contact criteria
+  marketing_contact_criteria:
+    min_engagement_months: 12
+    required_actions: ["email_open", "email_click", "form_submission"]
+```
+
+### How Configuration Enhances AI Recommendations
+
+**Context-Aware Audits:**
+```bash
+$ hubspot-audit contacts --check-data-quality
+
+Analyzing 1,832 contacts with Centercode context...
+
+Issues Found (Context-Aware):
+├─ 234 contacts missing job titles (critical for B2B targeting)
+│  └─ AI: Job titles are essential for your ICP targeting
+├─ 89 contacts from non-ICP industries (e.g., Retail, Healthcare)
+│  └─ AI: Consider moving to non-marketing or cleaning up
+└─ 45 contacts with generic titles like "Manager"
+   └─ AI: These don't match your ICP decision-maker personas
+```
+
+**Feature Recommendations Based on Business Model:**
+```bash
+$ hubspot-audit features --analyze
+
+Based on your B2B SaaS model with 60-90 day sales cycle:
+
+High Priority:
+├─ Account-Based Marketing: Perfect for your enterprise ICP
+├─ Deal Pipeline Customization: Match your specific sales stages
+└─ Sequences: Automate your multi-touch outreach
+
+Medium Priority:
+├─ Lead Scoring: Prioritize based on company size + job title
+└─ Custom Reporting: Track metrics specific to your sales cycle
+```
+
+**Smart Property Standardization:**
+```bash
+$ hubspot-audit properties --standardize
+
+Using your industry mapping rules:
+├─ "Tech" → "Technology" (18 contacts)
+├─ "IT" → "Technology" (12 contacts)
+└─ "Software Dev" → "Technology" (8 contacts)
+
+ICP-Based Validation:
+├─ 234 contacts in non-ICP industries flagged
+└─ Recommendation: Review for qualification or removal
+```
+
+### Configuration Management Commands
+
+```bash
+# Initialize configuration with guided setup
+$ hubspot-audit config --init
+
+# View current configuration
+$ hubspot-audit config --show
+
+# Update specific values
+$ hubspot-audit config --set company.name="Centercode"
+$ hubspot-audit config --set icp.company_size="50-500 employees"
+
+# Import configuration from file
+$ hubspot-audit config --import ./company-config.yaml
+
+# Export current configuration
+$ hubspot-audit config --export ./backup-config.yaml
+
+# Validate configuration
+$ hubspot-audit config --validate
+```
+
+### Benefits of Configuration System
+
+1. **Personalized Recommendations**: AI understands your business context
+2. **Industry-Specific Insights**: Suggestions tailored to your market
+3. **ICP Alignment**: Validates contacts against your ideal customer profile
+4. **Consistent Standards**: Enforces your company's data conventions
+5. **Reusable Rules**: Define once, apply everywhere
+6. **Team Collaboration**: Share configuration across team members
+7. **Environment-Specific**: Different configs for staging vs production
+
 ---
 
 ## AI-Powered Recommendations
@@ -1496,8 +1768,9 @@ Estimated cleanup time: 45 minutes
 
 ### 2. MVP Feature Selection
 Recommend starting with:
-- **Core audits**: Data quality, duplicates, property consistency, list hygiene, **marketing contact optimization**
-- **AI-powered recommendations** via Claude with pattern analysis
+- **Core audits**: Data quality, duplicates, property consistency, list hygiene, **marketing contact optimization**, **HubSpot feature utilization**
+- **Configuration system**: Company profile, ICP, custom rules for context-aware recommendations
+- **AI-powered recommendations** via Claude with pattern analysis and context awareness
 - **Action plan generation** with preview and human approval
 - **Execution with rollback** for safe changes
 - **Basic workflow generation** (2-3 preventive workflow types)
@@ -1505,8 +1778,9 @@ Recommend starting with:
 - **Bulk operations** for mass updates and transformations
 
 This provides immediate value through:
-- **Cost savings**: Marketing contact optimization (~$495/month potential savings)
+- **Cost savings**: Marketing contact optimization (~$495/month) + maximizing HubSpot ROI
 - **Time savings**: Bulk operations instead of manual clicking
+- **Better decisions**: Context-aware AI recommendations based on your ICP and business model
 - **Problem prevention**: Workflows + alerts stop issues before they happen
 - **Foundation**: Establishes core architecture for v2 features
 
@@ -1521,8 +1795,10 @@ This provides immediate value through:
 
 **Phase 1 (MVP)** - Core Value:
 - Foundation: CLI framework, HubSpot API, Claude integration
+- **Configuration system**: YAML config for company context, ICP, rules
 - Core audits: Data quality, duplicates, properties, lists
 - **Marketing contact optimization** (cost savings feature)
+- **HubSpot feature utilization analysis** (ROI optimization)
 - Action plans with preview
 - Execution with rollback
 - Basic workflow generation
@@ -2099,12 +2375,13 @@ Generate optimized form? [y/N]
 Based on business impact and implementation complexity:
 
 **MVP (Phase 1)** - Core Features:
-1. ✅ **Core Audits** - Data quality, duplicates, properties, lists, **marketing contact optimization**
-2. ✅ **AI Recommendations** - Pattern analysis and fix suggestions
-3. ✅ **Action Plans** - Preview and batch execution with rollback
-4. ✅ **Workflow Generation** - Basic preventive workflows (2-3 types)
-5. **Smart Alerts** - Proactive anomaly detection and notifications
-6. **Bulk Operations** - Mass updates and transformations
+1. ✅ **Configuration System** - Company profile, ICP, custom rules for context-aware AI
+2. ✅ **Core Audits** - Data quality, duplicates, properties, lists, **marketing contact optimization**, **HubSpot feature utilization**
+3. ✅ **AI Recommendations** - Context-aware pattern analysis and fix suggestions
+4. ✅ **Action Plans** - Preview and batch execution with rollback
+5. ✅ **Workflow Generation** - Basic preventive workflows (2-3 types)
+6. **Smart Alerts** - Proactive anomaly detection and notifications
+7. **Bulk Operations** - Mass updates and transformations
 
 **v2 (Phase 2)** - Advanced Features:
 7. **Configuration as Code** - Version control for HubSpot setup
@@ -2124,7 +2401,9 @@ Based on business impact and implementation complexity:
 ### Why This Prioritization?
 
 **MVP focuses on immediate pain relief**:
+- Configuration system enables **context-aware AI** that understands your business
 - Marketing contact optimization provides **instant cost savings** (~$495/month)
+- HubSpot feature utilization **maximizes ROI** on your subscription (potentially $400+/month in unlocked value)
 - Smart alerts **prevent issues before they happen**
 - Bulk operations **save hours of manual work**
 - Core audits + workflows create the **foundation for everything else**
