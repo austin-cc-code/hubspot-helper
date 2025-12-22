@@ -39,13 +39,22 @@ src/
 - HubSpot and Claude are shared services, not duplicated per module
 - Each audit module can run standalone
 
-## HubSpot API Notes
+## HubSpot Integration Notes
 
+**Potential Hybrid Architecture (under evaluation in Epic 1):**
+- **Audit phase**: HubSpot Remote MCP Server (read-only, physically cannot modify data)
+- **Execute phase**: `@hubspot/api-client` (full API access for writes)
+
+This enforces safety at the infrastructure level - audit operations literally cannot modify data.
+
+**API Notes:**
 - Use Private App access tokens, NOT API keys (deprecated)
 - Rate limit: 100 requests per 10 seconds (varies by endpoint/tier)
 - Use CRM Search API for filtered queries (more efficient than fetching all)
 - Batch APIs available for contacts/companies - use for efficiency
 - Always mask PII in logs
+
+**NOT using HubSpot CLI (`@hubspot/cli`)** - that's for building custom HubSpot apps, not CRM data management.
 
 ## Commands (planned)
 

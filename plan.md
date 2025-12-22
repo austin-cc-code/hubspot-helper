@@ -285,16 +285,50 @@ Research Questions:
 - Should we support multiple authentication methods?
 ```
 
-#### 4. HubSpot MCP Evaluation
-Evaluate the existing HubSpot MCP server:
+#### 4. HubSpot MCP Evaluation (Hybrid Approach)
 
+HubSpot provides TWO MCP servers - evaluate both:
+
+| Server | URL | Purpose |
+|--------|-----|---------|
+| **Remote MCP Server** | https://developers.hubspot.com/mcp | READ-ONLY CRM access |
+| **Developer MCP Server** | Via `hs mcp setup` | App scaffolding (not CRM data) |
+
+**Remote MCP Server Capabilities (as of Dec 2024):**
+- READ-ONLY access to: Contacts, Companies, Deals, Tickets, Invoices, Products, Line Items, Quotes, Subscriptions, Orders, Carts, Users
+- Can read associations between objects
+- CANNOT modify data (perfect for audit safety!)
+- Excludes sensitive data properties (PHI, etc.)
+
+**Potential Hybrid Architecture:**
 ```
-Research Questions:
-- What operations does the MCP currently support?
-- What are its limitations?
-- Can we extend it or should we build our own wrapper?
-- Is MCP the right approach or should we use direct API calls?
-- What's the MCP's error handling like?
+┌─────────────────────────────────────────────────────────────────┐
+│  AUDIT PHASE (read-only)          EXECUTE PHASE (writes)        │
+│  ─────────────────────────        ──────────────────────        │
+│  HubSpot MCP Server               @hubspot/api-client           │
+│  - Fetch contacts                 - Update properties           │
+│  - Fetch companies                - Merge contacts              │
+│  - Read associations              - Remove from lists           │
+│  - Search/filter                  - Set marketing status        │
+│                                                                 │
+│  ✓ Physically cannot modify       ⚠️ Requires confirmation     │
+│    data - safety guaranteed         before any changes          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Research Questions:**
+```
+MCP Server:
+- How to authenticate (OAuth 2.0 setup)?
+- What's the latency vs direct API?
+- Can it handle our volume (1000+ contacts)?
+- How to integrate MCP with our CLI (not just IDE)?
+- What data is excluded (sensitive properties)?
+
+Hybrid Approach:
+- Is the complexity worth the safety benefit?
+- Can we use MCP programmatically or only via IDE?
+- Fallback strategy if MCP is unavailable?
 ```
 
 #### 5. Batch Operations
@@ -306,29 +340,46 @@ Research Questions:
 - Are there transactional guarantees?
 ```
 
+#### 6. HubSpot CLI Evaluation
+
+**Note:** The HubSpot CLI (`@hubspot/cli`) is for building custom HubSpot apps, NOT for CRM data management. However, evaluate if any utilities are useful:
+
+```
+Research Questions:
+- Does `hs` CLI have any CRM data commands we could leverage?
+- Is the Developer MCP Server useful for our tool?
+- Any authentication helpers we can reuse?
+```
+
 **Tasks:**
 1. Set up a HubSpot developer test portal
 2. Create a Private App with necessary scopes
 3. Document all relevant API endpoints with examples
 4. Test rate limits empirically
-5. Evaluate HubSpot MCP capabilities and gaps
-6. Design credential storage strategy
-7. Create API capability matrix (what we need vs what's available)
-8. Document security requirements and best practices
-9. Prototype critical operations (search, batch update, workflow creation)
-10. Write research findings document
+5. **Set up and test HubSpot Remote MCP Server**
+6. **Evaluate hybrid MCP (reads) + API (writes) approach**
+7. **Prototype MCP integration for audit reads**
+8. Design credential storage strategy
+9. Create API capability matrix (what we need vs what's available)
+10. Document security requirements and best practices
+11. Prototype critical operations (search, batch update, workflow creation)
+12. Write research findings document
+13. **Make go/no-go decision on hybrid architecture**
 
 **Deliverables:**
 - `docs/hubspot-api-research.md` - Comprehensive API documentation
 - `docs/security-requirements.md` - Security design decisions
-- `docs/mcp-evaluation.md` - MCP gaps and recommendations
+- `docs/mcp-evaluation.md` - MCP evaluation with hybrid architecture recommendation
+- `docs/architecture-decision.md` - Final decision: MCP+API hybrid vs API-only
 - Working prototype scripts demonstrating key operations
 
 **Acceptance Criteria:**
 - [ ] All required API endpoints documented with rate limits
 - [ ] Security model designed and documented
-- [ ] MCP evaluated with clear recommendation (use, extend, or replace)
+- [ ] **HubSpot Remote MCP Server tested and documented**
+- [ ] **Hybrid vs API-only decision made with rationale**
 - [ ] Prototype demonstrates: batch contact update, search, workflow creation
+- [ ] **If hybrid: MCP read prototype working**
 - [ ] Credential storage strategy decided
 - [ ] Rate limiting strategy designed
 
