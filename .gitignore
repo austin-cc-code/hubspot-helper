@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment and credentials
+.env
+.env.*
+.credentials/
+*.pem
+*.key
+
+# Config files with secrets
+hubspot-audit.config.yaml
+.hubspot-audit/
+
+# Logs
+*.log
+logs/
+pino-*.log
+
+# Test coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Audit output (may contain PII)
+audit-reports/
+
+# Lock files (keep package-lock.json)
+yarn.lock
+pnpm-lock.yaml

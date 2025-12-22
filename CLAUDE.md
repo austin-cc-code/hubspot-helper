@@ -56,23 +56,64 @@ src/
 - HubSpot MCP Server - wrong tool for our use case
 - HubSpot CLI (`@hubspot/cli`) - for building custom HubSpot apps, not CRM data
 
-## Commands (planned)
+## Development Commands
 
 ```bash
-npm run build          # Compile TypeScript
-npm run dev            # Run with tsx
-npm run test           # Run Jest tests
+npm run build          # Compile TypeScript to dist/
+npm run start          # Run compiled CLI
+npm run dev            # Run with tsx (no compile needed)
 npm run lint           # ESLint check
-
-# CLI usage
-hubspot-audit config init                    # Setup wizard
-hubspot-audit audit contacts --check=data-quality  # Generate plan (read-only)
-hubspot-audit plan show <plan-file>          # Review plan
-hubspot-audit execute <plan-file>            # Execute with confirmation
-hubspot-audit rollback <execution-id>        # Undo changes
+npm run lint:fix       # ESLint with auto-fix
+npm run format         # Prettier format
+npm run test           # Run Jest tests (ESM mode)
+npm run test:watch     # Jest in watch mode
+npm run test:coverage  # Jest with coverage report
 ```
+
+## CLI Commands
+
+```bash
+# After build or via npx
+npx hubspot-audit --help
+npx hubspot-audit config init                    # Setup wizard
+npx hubspot-audit audit contacts --check=data-quality  # Generate plan (read-only)
+npx hubspot-audit plan show <plan-file>          # Review plan
+npx hubspot-audit execute <plan-file>            # Execute with confirmation
+npx hubspot-audit rollback <execution-id>        # Undo changes
+```
+
+## Project Configuration
+
+- **Module System:** ESM (`"type": "module"` in package.json)
+- **Node.js:** >=20.0.0 (uses native fetch)
+- **TypeScript:** ES2022 target, NodeNext module resolution, strict mode
+- **Testing:** Jest with ts-jest ESM preset, requires `--experimental-vm-modules`
+
+## Environment Variables
+
+```bash
+HUBSPOT_ACCESS_TOKEN    # HubSpot Private App token (required)
+HUBSPOT_PORTAL_ID       # HubSpot portal ID
+ANTHROPIC_API_KEY       # Claude API key (required for AI features)
+LOG_LEVEL               # debug, info, warn, error (default: info)
+LOG_PRETTY              # true for pretty console output (default: false)
+```
+
+## Logging
+
+Uses `pino` with PII redaction. Create child loggers per module:
+
+```typescript
+import { createLogger } from '../utils/logger.js';
+const logger = createLogger('myModule');
+logger.info({ data }, 'Message');
+```
+
+PII fields (email, phone, name, etc.) are automatically redacted in logs.
 
 ## Key Files
 
 - `plan.md` - Detailed implementation plan with epics
 - `IDEATION.md` - Feature concepts and user flows
+- `.credentials/.env` - Local credentials (gitignored)
+- `.env.example` - Template for environment variables
