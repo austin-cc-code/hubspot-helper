@@ -39,13 +39,11 @@ src/
 - HubSpot and Claude are shared services, not duplicated per module
 - Each audit module can run standalone
 
-## HubSpot Integration Notes
+## HubSpot Integration
 
-**Potential Hybrid Architecture (under evaluation in Epic 1):**
-- **Audit phase**: HubSpot Remote MCP Server (read-only, physically cannot modify data)
-- **Execute phase**: `@hubspot/api-client` (full API access for writes)
+**Using `@hubspot/api-client` only.** MCP was evaluated and rejected (see Epic 1 in plan.md).
 
-This enforces safety at the infrastructure level - audit operations literally cannot modify data.
+**Why not MCP:** MCP is for LLM tool exposure. We're a CLI that uses AI for analysis, not an AI agent. No code savings, unnecessary complexity.
 
 **API Notes:**
 - Use Private App access tokens, NOT API keys (deprecated)
@@ -54,7 +52,9 @@ This enforces safety at the infrastructure level - audit operations literally ca
 - Batch APIs available for contacts/companies - use for efficiency
 - Always mask PII in logs
 
-**NOT using HubSpot CLI (`@hubspot/cli`)** - that's for building custom HubSpot apps, not CRM data management.
+**NOT using:**
+- HubSpot MCP Server - wrong tool for our use case
+- HubSpot CLI (`@hubspot/cli`) - for building custom HubSpot apps, not CRM data
 
 ## Commands (planned)
 
