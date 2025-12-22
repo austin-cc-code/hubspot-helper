@@ -169,6 +169,14 @@ tests/
 
 **Objective**: Set up development environment and project structure.
 
+**Technical Decisions:**
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Module system | ESM (`"type": "module"`) | Modern Node.js standard, better tree-shaking |
+| Node.js version | 20 LTS (>=20.0.0) | Current LTS, native fetch, stable |
+| Package manager | npm | Standard, no extra tooling needed |
+| TypeScript target | ES2022 | Matches Node 20 capabilities |
+
 **Tasks:**
 1. Initialize Node.js project with TypeScript
 2. Configure tsconfig.json for strict mode
@@ -179,7 +187,7 @@ tests/
 7. Add .env.example for required environment variables
 8. Configure package.json `bin` entry for CLI executable
 9. Create .gitignore (node_modules, dist, .env, *.log, etc.)
-10. Add `engines` field specifying Node.js >=18 (for native fetch)
+10. Add `engines` field specifying Node.js >=20 (LTS, native fetch)
 11. Define npm scripts (build, start, dev, lint, test, test:watch)
 12. Set up basic logging infrastructure (pino or winston)
 
@@ -203,11 +211,12 @@ npm install -D @types/inquirer @types/js-yaml  # Missing type definitions
 {
   "name": "hubspot-audit",
   "version": "0.1.0",
+  "type": "module",
   "bin": {
     "hubspot-audit": "./dist/cli/index.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "build": "tsc",
@@ -215,9 +224,9 @@ npm install -D @types/inquirer @types/js-yaml  # Missing type definitions
     "dev": "tsx src/cli/index.ts",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage"
   }
 }
 ```
