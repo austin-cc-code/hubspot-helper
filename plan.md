@@ -475,13 +475,41 @@ hubspot-audit config set <key> <value>  # Set a config value
 6. Handle environment variable fallbacks for API keys
 
 **Acceptance Criteria:**
-- [ ] `config init` walks through setup and creates valid config
-- [ ] `config validate` catches invalid configs with clear errors
-- [ ] API keys can come from config file OR environment variables
-- [ ] Config is type-safe throughout codebase
-- [ ] Missing config shows helpful setup instructions
+- [x] `config init` walks through setup and creates valid config
+- [x] `config validate` catches invalid configs with clear errors
+- [x] API keys can come from config file OR environment variables
+- [x] Config is type-safe throughout codebase
+- [x] Missing config shows helpful setup instructions
 
 **Estimated Effort**: Medium
+
+**Status**: ✅ **COMPLETE** (2025-12-22)
+
+**Completion Notes:**
+- Created Zod schemas for runtime config validation in `src/config/schema.ts`
+- Implemented `ConfigManager` class with full CRUD operations:
+  - `load()` - Loads config from file with env var fallbacks
+  - `save()` - Saves config with validation
+  - `validate()` - Validates without loading
+  - `update()` - Deep merge updates
+  - `maskSensitive()` - Masks API keys for display
+- Created interactive `config init` wizard with inquirer:
+  - Collects company information (name, industry, business model)
+  - Optionally collects API credentials (with env var recommendation)
+  - Optionally sets up Ideal Customer Profile (ICP)
+  - Saves to `~/.hubspot-audit/config.yaml`
+- Implemented config commands:
+  - `config init` - Interactive setup wizard
+  - `config show` - Display current config (with masked credentials)
+  - `config validate` - Validate config file with detailed error messages
+  - `config set <key> <value>` - Update specific config values
+- Environment variable fallbacks for credentials:
+  - `HUBSPOT_ACCESS_TOKEN` overrides `hubspot.access_token`
+  - `ANTHROPIC_API_KEY` overrides `anthropic.api_key`
+  - Env vars loaded automatically and take precedence
+- Config defaults in `src/config/defaults.ts`
+- Comprehensive test suite (14 tests) covering all ConfigManager functionality
+- All tests passing, build successful
 
 ---
 

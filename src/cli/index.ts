@@ -8,6 +8,7 @@
 
 import { Command } from 'commander';
 import { createLogger } from '../utils/logger.js';
+import { configInit, configShow, configValidate, configSet } from './commands/config.js';
 
 const logger = createLogger('cli');
 
@@ -21,14 +22,59 @@ program
   .version('0.1.0');
 
 // Config commands
-program
+const configCmd = program
   .command('config')
-  .description('Manage configuration')
-  .argument('<action>', 'Action to perform: init, show, validate, set')
-  .action((action: string) => {
-    logger.info({ action }, 'Config command invoked');
-    // TODO: Implement config commands in Epic 2
-    process.stdout.write(`Config ${action} - Coming in Epic 2\n`);
+  .description('Manage configuration');
+
+configCmd
+  .command('init')
+  .description('Initialize configuration with interactive wizard')
+  .action(async () => {
+    try {
+      await configInit();
+    } catch (error) {
+      logger.error({ error }, 'Config init failed');
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('show')
+  .description('Display current configuration')
+  .option('--config <path>', 'Use alternate config file')
+  .action(async (options: { config?: string }) => {
+    try {
+      await configShow(options);
+    } catch (error) {
+      logger.error({ error }, 'Config show failed');
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('validate')
+  .description('Validate configuration file')
+  .option('--config <path>', 'Use alternate config file')
+  .action(async (options: { config?: string }) => {
+    try {
+      await configValidate(options);
+    } catch (error) {
+      logger.error({ error }, 'Config validate failed');
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('set <key> <value>')
+  .description('Set a configuration value (e.g., config set company.name "Acme Corp")')
+  .option('--config <path>', 'Use alternate config file')
+  .action(async (key: string, value: string, options: { config?: string }) => {
+    try {
+      await configSet(key, value, options);
+    } catch (error) {
+      logger.error({ error }, 'Config set failed');
+      process.exit(1);
+    }
   });
 
 // Audit command placeholder
