@@ -41,20 +41,75 @@ src/
 
 ## HubSpot Integration
 
-**Using `@hubspot/api-client` only.** MCP was evaluated and rejected (see Epic 1 in plan.md).
+**Using `@hubspot/api-client` only.** MCP was evaluated and rejected (see Epic 1 in plan.md and `docs/hubspot-api-research.md`).
 
 **Why not MCP:** MCP is for LLM tool exposure. We're a CLI that uses AI for analysis, not an AI agent. No code savings, unnecessary complexity.
-
-**API Notes:**
-- Use Private App access tokens, NOT API keys (deprecated)
-- Rate limit: 100 requests per 10 seconds (varies by endpoint/tier)
-- Use CRM Search API for filtered queries (more efficient than fetching all)
-- Batch APIs available for contacts/companies - use for efficiency
-- Always mask PII in logs
 
 **NOT using:**
 - HubSpot MCP Server - wrong tool for our use case
 - HubSpot CLI (`@hubspot/cli`) - for building custom HubSpot apps, not CRM data
+
+### API Key Patterns (Epic 1 Research)
+
+**Authentication:**
+- Private App tokens: `pat-na1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+- Required scopes: `crm.objects.{contacts,companies,deals}.{read,write}`, `crm.schemas.*.read`, `crm.lists.{read,write}`
+- Initialize client: `new Client({ accessToken: process.env.HUBSPOT_ACCESS_TOKEN })`
+
+**Rate Limiting (Critical!):**
+- **100 requests per rolling 10-second window**
+- Batch operations count as 1 request (up to 100 records)
+- Use token bucket algorithm: start with 100, refill to 100 every 10s
+- 429 responses include `Retry-After` header
+- Rate limit headers: `x-hubspot-ratelimit-{daily,daily-remaining,max,remaining}`
+
+**Search API (Prefer over getAll):**
+```typescript
+// GOOD: Efficient filtering
+await client.crm.contacts.searchApi.doSearch({
+  filterGroups: [{
+    filters: [{ propertyName: 'email', operator: 'HAS_PROPERTY' }]
+  }],
+  properties: ['email', 'firstname'],
+  limit: 100
+});
+
+// BAD: Fetches everything then filters
+const all = await client.crm.contacts.getAll();
+const filtered = all.filter(c => c.properties.email);
+```
+
+**Batch Operations (Always use for >1 record):**
+```typescript
+// Read up to 100 contacts in 1 API call
+await client.crm.contacts.batchApi.read({
+  properties: ['email'],
+  inputs: ids.map(id => ({ id }))
+});
+
+// Update up to 100 in 1 call
+await client.crm.contacts.batchApi.update({
+  inputs: updates.map(u => ({ id: u.id, properties: u.properties }))
+});
+```
+
+**Operators:** `HAS_PROPERTY`, `NOT_HAS_PROPERTY`, `EQ`, `NEQ`, `LT`, `LTE`, `GT`, `GTE`, `BETWEEN`, `IN`, `NOT_IN`, `CONTAINS_TOKEN`
+
+**Pagination:** Use `after` cursor (not offset). Response includes `paging.next.after`.
+
+**Merges (Irreversible!):**
+- `client.crm.contacts.merge({ primaryObjectId, objectIdToMerge })`
+- Secondary record permanently deleted
+- Cannot be undone via API
+- Require extra confirmation in UI
+
+**Error Codes:**
+- `401`: Invalid/expired token
+- `403`: Missing scope
+- `429`: Rate limited (check `Retry-After` header)
+- `404`: Object not found
+
+See `docs/hubspot-api-research.md` for comprehensive API documentation.
 
 ## Development Commands
 
@@ -111,9 +166,64 @@ logger.info({ data }, 'Message');
 
 PII fields (email, phone, name, etc.) are automatically redacted in logs.
 
+## Security Patterns (Epic 1 Research)
+
+**PII Protection:**
+- All logs automatically redact: email, phone, name, firstName, lastName, address
+- Use `safeLog(data)` for manual redaction
+- Plan files contain PII (stored in gitignored `./audit-reports/`)
+- Rollback data contains PII (encrypt at rest in Phase 2)
+
+**Confirmation Requirements:**
+```typescript
+// Standard operations: Simple yes/no
+const { proceed } = await inquirer.prompt([{ type: 'confirm', name: 'proceed', message: 'Update 5 contacts?' }]);
+
+// Non-reversible operations: Type phrase
+const { confirmation } = await inquirer.prompt([{
+  type: 'input',
+  name: 'confirmation',
+  message: 'Type "MERGE AND DELETE" to confirm:'
+}]);
+```
+
+**File Permissions:**
+```typescript
+await writeFile(path, data);
+await chmod(path, 0o600); // Owner read/write only
+```
+
+**Never Log:**
+- Access tokens
+- API keys
+- Full contact records (use IDs only)
+
+See `docs/security-requirements.md` for full security design.
+
+## Testing Prototypes
+
+Run API prototypes to verify functionality:
+
+```bash
+# Test HubSpot connection and scopes
+npx tsx scripts/prototypes/test-connection.ts
+
+# Test Search API
+npx tsx scripts/prototypes/test-search.ts
+
+# Test batch operations
+npx tsx scripts/prototypes/test-batch.ts
+
+# Test rate limiting behavior
+npx tsx scripts/prototypes/test-rate-limits.ts
+```
+
 ## Key Files
 
 - `plan.md` - Detailed implementation plan with epics
 - `IDEATION.md` - Feature concepts and user flows
-- `.credentials/.env` - Local credentials (gitignored)
+- `docs/hubspot-api-research.md` - Comprehensive API documentation (Epic 1)
+- `docs/security-requirements.md` - Security design (Epic 1)
+- `docs/epic-1-summary.md` - Epic 1 completion summary
+- `.credentials/.env` or `.env` - Local credentials (gitignored)
 - `.env.example` - Template for environment variables
