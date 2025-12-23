@@ -64,6 +64,22 @@ export const dataQualityRulesSchema = z.object({
   industry_mappings: z.record(z.string()).default({}),
 });
 
+// Data quality AI config schema (Epic 6)
+export const dataQualityAiConfigSchema = z.object({
+  // Control which AI features to use
+  enable_ambiguous_analysis: z.boolean().default(true),
+  max_ai_cost_per_audit: z.number().positive().default(2.0),
+
+  // Thresholds for triggering AI analysis
+  min_ambiguous_cases_for_ai: z.number().int().positive().default(10),
+  max_ambiguous_cases_per_run: z.number().int().positive().default(100),
+
+  // What to analyze with AI
+  analyze_name_typos: z.boolean().default(true),
+  analyze_semantic_anomalies: z.boolean().default(true),
+  analyze_cross_record_patterns: z.boolean().default(false), // Expensive
+});
+
 // Rate limit settings schema
 export const rateLimitSettingsSchema = z.object({
   requests_per_10_seconds: z.number().int().positive().default(100),
@@ -92,6 +108,7 @@ export const configSchema = z.object({
   company: companyContextSchema,
   icp: icpSchema.default({}),
   rules: dataQualityRulesSchema.default({}),
+  data_quality: dataQualityAiConfigSchema.default({}),
   settings: auditSettingsSchema.default({}),
   security: securitySettingsSchema.default({}),
 });
@@ -107,5 +124,7 @@ export type AnthropicConfig = z.infer<typeof anthropicConfigSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
 export type IdealCustomerProfile = z.infer<typeof icpSchema>;
 export type DataQualityRules = z.infer<typeof dataQualityRulesSchema>;
+export type DataQualityAiConfig = z.infer<typeof dataQualityAiConfigSchema>;
+export type RateLimitSettings = z.infer<typeof rateLimitSettingsSchema>;
 export type AuditSettings = z.infer<typeof auditSettingsSchema>;
 export type SecuritySettings = z.infer<typeof securitySettingsSchema>;

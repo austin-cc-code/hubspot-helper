@@ -1552,19 +1552,68 @@ type ActionType =
 8. Add filtering options (by confidence, by type, by detection method)
 
 **Acceptance Criteria:**
-- [ ] Audit results automatically generate action plans
-- [ ] Each action has clear reasoning
-- [ ] **NEW:** AI-generated actions include confidence_factors and thinking excerpts
-- [ ] **NEW:** Plan summary shows breakdown by detection method (rule vs AI)
-- [ ] **NEW:** AI context section captures overall patterns and strategic recommendations
-- [ ] Actions are scored by confidence
-- [ ] Plans save to JSON files with readable format
-- [ ] CLI shows clear preview of what will change
-- [ ] Can filter to high-confidence actions only
-- [ ] **NEW:** Can filter by detection method (--rule-based-only, --ai-only)
-- [ ] **NEW:** Plan display highlights AI reasoning when present
+- [x] Audit results automatically generate action plans
+- [x] Each action has clear reasoning
+- [x] **NEW:** AI-generated actions include confidence_factors and thinking excerpts
+- [x] **NEW:** Plan summary shows breakdown by detection method (rule vs AI)
+- [x] **NEW:** AI context section captures overall patterns and strategic recommendations
+- [x] Actions are scored by confidence
+- [x] Plans save to JSON files with readable format
+- [x] CLI shows clear preview of what will change
+- [x] Can filter to high-confidence actions only
+- [x] **NEW:** Can filter by detection method (--rule-based-only, --ai-only)
+- [x] **NEW:** Plan display highlights AI reasoning when present
 
 **Estimated Effort**: Medium
+
+**Status**: ✅ **COMPLETE** (2025-12-23)
+
+**Completion Notes:**
+- **Enhanced Type System** (`src/types/actions.ts`):
+  - Added `AIReasoning` interface with confidence_factors, thinking_excerpt, explored_alternatives
+  - Added `AIContext` interface for plan-level AI insights
+  - Extended `ActionPlanSummary` with `by_detection_method` tracking
+  - Added `DetectionMethod` type (rule, ai_reasoning, ai_exploratory)
+- **ActionPlan Class** (`src/actions/ActionPlan.ts`, 378 lines):
+  - Full save/load functionality with JSON formatting
+  - Filter actions by confidence, detection method, action type, reversibility
+  - Group actions by confidence and detection method
+  - Identify high-risk actions (non-reversible or requiring confirmation)
+  - Validate and order actions by dependencies
+  - Create filtered copies of plans
+  - Parse plan filenames for metadata extraction
+- **PlanBuilder Class** (`src/actions/PlanBuilder.ts`, 436 lines):
+  - Convert AuditResults to ActionPlans with full AI reasoning capture
+  - Map issue types to appropriate action types with reversibility logic
+  - Extract AI reasoning from AI-detected issues with confidence factors
+  - Build AI context from audit insights (patterns, recommendations, thinking summary)
+  - Apply confidence scoring logic (rule-based=high, AI-based=varies)
+  - Determine reversibility and confirmation requirements per action type
+  - Calculate comprehensive summary statistics by type, confidence, and detection method
+- **CLI Integration**:
+  - Updated `audit` command to automatically generate and save action plans after audits
+  - Implemented `plan show` command with:
+    - Full metadata display (ID, source audit, creation date)
+    - Summary statistics by confidence and detection method
+    - AI context with patterns and strategic recommendations
+    - Detailed action listings grouped by confidence level
+    - High-risk action warnings (non-reversible actions)
+    - Filtering by confidence level (--filter=high/medium/low)
+    - Filtering by detection method (--filter=rule/ai_reasoning/ai_exploratory)
+    - Summary-only mode (--summary)
+    - JSON output support (--json)
+- **Comprehensive Testing**:
+  - 21 unit tests for ActionPlan class (100% coverage)
+  - 17 unit tests for PlanBuilder class (100% coverage)
+  - All 135 tests passing across entire codebase
+  - Build successful with no TypeScript errors
+- **Key Features Implemented**:
+  - Full transparency: Every action shows detection method and reasoning
+  - AI reasoning capture: Confidence factors and thinking excerpts preserved
+  - Safety first: Non-reversible actions clearly marked with warnings
+  - Flexible filtering: By confidence, detection method, action type, reversibility
+  - Dependency management: Validation and ordering of dependent actions
+  - Professional CLI: Colored output, clear structure, helpful next-step guidance
 
 **Rationale for Changes:**
 

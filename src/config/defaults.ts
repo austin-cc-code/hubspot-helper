@@ -33,6 +33,15 @@ export const defaultConfig: Omit<Config, 'company'> = {
     min_engagement_months: 12,
     industry_mappings: {},
   },
+  data_quality: {
+    enable_ambiguous_analysis: true,
+    max_ai_cost_per_audit: 2.0,
+    min_ambiguous_cases_for_ai: 10,
+    max_ambiguous_cases_per_run: 100,
+    analyze_name_typos: true,
+    analyze_semantic_anomalies: true,
+    analyze_cross_record_patterns: false,
+  },
   settings: {
     batch_size: 100,
     rate_limit: {

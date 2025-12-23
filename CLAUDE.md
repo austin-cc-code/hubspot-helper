@@ -218,6 +218,94 @@ npx tsx scripts/prototypes/test-batch.ts
 npx tsx scripts/prototypes/test-rate-limits.ts
 ```
 
+## Audit Module Pattern (Epic 6)
+
+All audit modules follow a consistent two-phase pattern: cheap rule-based checks first, then selective AI analysis for ambiguous cases.
+
+### AuditModule Interface
+
+```typescript
+interface AuditModule {
+  name: string;
+  description: string;
+  run(context: AuditContext): Promise<AuditResult>;
+}
+
+interface AuditContext {
+  hubspot: HubSpotService;    // HubSpot API wrapper
+  claude: ClaudeService;       // Claude AI service
+  config: Config;              // Full app configuration
+  progress: ProgressReporter;  // UI progress updates
+}
+```
+
+### Two-Phase Analysis Pattern
+
+**Phase 1: Rule-Based (Fast, Free, High-Confidence)**
+- Missing required fields
+- Invalid formats (email, phone, URL)
+- Stale data (no activity in X days)
+- Obvious typos (regex patterns)
+- All issues have `detection_method: 'rule'` and `confidence: 'high'`
+
+**Phase 2: Agentic AI (Selective, Cost-Effective)**
+- Only runs if ambiguous cases ≥ `min_ambiguous_cases_for_ai` (default: 10)
+- Capped at `max_ambiguous_cases_per_run` (default: 100)
+- Respects `max_ai_cost_per_audit` budget (default: $2.00)
+- Two AI modes:
+  - **REASONING**: Ambiguous typos, semantic anomalies (`detection_method: 'ai_reasoning'`)
+  - **EXPLORATORY**: Context-dependent validation with data exploration (`detection_method: 'ai_exploratory'`)
+
+### Detection Method Tracking
+
+Every `AuditIssue` includes:
+- `detection_method`: `'rule' | 'ai_reasoning' | 'ai_exploratory'`
+- `confidence`: `'high' | 'medium' | 'low'`
+- `reasoning?: string` (for AI-detected issues)
+
+Summary tracks counts:
+```typescript
+summary.by_detection_method = {
+  rule_based: number,
+  ai_reasoning: number,
+  ai_exploratory: number
+};
+summary.ai_cost_usd: number;
+```
+
+### Creating a New Audit Module
+
+1. **Implement AuditModule interface** in `src/audits/YourAudit.ts`
+2. **Phase 1: Rule-based checks** - Fast, deterministic validation
+3. **Identify ambiguous cases** - Cases that need AI judgment
+4. **Phase 2: AI analysis** - Use `context.claude.analyzeWithReasoning()` or `analyzeWithExploration()`
+5. **Track costs** - Get cost from `context.claude.getUsageStats().estimatedCostUsd`
+6. **Generate insights** - Patterns, recommendations, thinking summary
+7. **Export** from `src/audits/index.ts`
+8. **Register in CLI** - Add case to `runCheck()` in `src/cli/commands/audit.ts`
+
+### Example: DataQualityAudit
+
+See `src/audits/DataQualityAudit.ts` for the complete implementation pattern. Key features:
+- Loads contacts with all required properties
+- Phase 1: 6 rule-based validations (email, phone, required fields, etc.)
+- Phase 2: Identifies ambiguous name typos and semantic anomalies
+- Cost control: Respects budget, batches AI requests
+- Returns structured `AuditResult` with issues and insights
+
+### Config: data_quality Section
+
+```yaml
+data_quality:
+  enable_ambiguous_analysis: true
+  max_ai_cost_per_audit: 2.0
+  min_ambiguous_cases_for_ai: 10
+  max_ambiguous_cases_per_run: 100
+  analyze_name_typos: true
+  analyze_semantic_anomalies: true
+  analyze_cross_record_patterns: false  # Expensive
+```
+
 ## Key Files
 
 - `plan.md` - Detailed implementation plan with epics
