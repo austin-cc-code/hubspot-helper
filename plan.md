@@ -757,35 +757,53 @@ Actions available:
 
 ### Epic 5: Claude Service
 
-**Objective**: Claude API integration for intelligent analysis with cost controls and reliability.
+**Objective**: Claude API integration with **native agentic capabilities** for intelligent analysis with cost controls and reliability.
+
+**Key Enhancement**: This epic now incorporates Claude's native agentic features (extended thinking, tool use, multi-turn conversations) without adding framework complexity. This provides the foundation for sophisticated reasoning in audits that require business judgment, complex pattern matching, or strategic decision-making.
+
+**Analysis Modes:**
+
+Claude's capabilities will be used in different modes depending on the audit needs:
+
+| Mode | When to Use | Features | Cost Impact | Use Cases |
+|------|-------------|----------|-------------|-----------|
+| **Simple** | Obvious patterns, structured output | Tool use for JSON | Baseline | Typo detection, format fixes |
+| **Reasoning** | Ambiguous cases, pattern detection | + Extended thinking | +50% | Duplicate matching, anomaly detection |
+| **Exploratory** | Business judgment, risk assessment | + Extended thinking + data exploration tools | +100% | Marketing optimization, ICP alignment |
+| **Iterative** | Strategic recommendations, complex analysis | + Extended thinking + tools + multi-turn (max 2) | +150% | Feature prioritization, cross-cutting insights |
 
 **Model Selection Strategy:**
-| Use Case | Model | Rationale |
-|----------|-------|-----------|
-| Data Quality Analysis | claude-sonnet-4-20250514 | Good balance of quality/cost for pattern detection |
-| Duplicate Analysis | claude-sonnet-4-20250514 | Needs reasoning for fuzzy matching decisions |
-| Summary Generation | claude-3-haiku-20240307 | Fast, cheap for text generation |
-| Complex Reasoning | claude-sonnet-4-20250514 | When context requires deep analysis |
+| Use Case | Model | Mode | Rationale |
+|----------|-------|------|-----------|
+| Data Quality Analysis (obvious) | claude-3-haiku-20240307 | Simple | Fast, cheap for clear-cut issues |
+| Data Quality Analysis (ambiguous) | claude-sonnet-4-20250514 | Reasoning | Pattern detection needs thinking |
+| Duplicate Analysis (ambiguous) | claude-sonnet-4-20250514 | Reasoning/Exploratory | Complex matching decisions |
+| Marketing Optimization | claude-sonnet-4-20250514 | Exploratory | Business judgment required |
+| Feature Utilization | claude-sonnet-4-20250514 | Iterative | Strategic prioritization |
+| Summary Generation | claude-3-haiku-20240307 | Simple | Text generation only |
 
 **ClaudeService Interface:**
 ```typescript
 class ClaudeService {
   constructor(config: ClaudeConfig);
 
-  // Analysis methods
+  // Analysis methods (now mode-aware)
   async analyzeDataQuality(
     contacts: Contact[],
-    config: Config
+    config: Config,
+    mode?: AnalysisMode
   ): Promise<DataQualityAnalysis>
 
   async analyzeDuplicates(
     pairs: ContactPair[],
-    config: Config
+    config: Config,
+    mode?: AnalysisMode
   ): Promise<DuplicateAnalysis>
 
   async analyzeProperties(
     properties: PropertyUsage[],
-    config: Config
+    config: Config,
+    mode?: AnalysisMode
   ): Promise<PropertyAnalysis>
 
   async generateSummary(
@@ -793,14 +811,38 @@ class ClaudeService {
     config: Config
   ): Promise<NaturalLanguageSummary>
 
-  // Cost tracking
+  // NEW: Agentic analysis with extended thinking and tools
+  async analyzeWithReasoning<T>(
+    prompt: string,
+    tools: Tool[],
+    config: AnalysisConfig
+  ): Promise<T>
+
+  async analyzeWithExploration<T>(
+    prompt: string,
+    tools: Tool[],
+    config: AnalysisConfig
+  ): Promise<T>
+
+  // Cost tracking (now includes thinking tokens)
   getUsageStats(): UsageStats;
-  estimateCost(operation: OperationType, dataSize: number): CostEstimate;
+  estimateCost(operation: OperationType, dataSize: number, mode: AnalysisMode): CostEstimate;
 }
+
+type AnalysisMode = 'simple' | 'reasoning' | 'exploratory' | 'iterative';
 
 interface ClaudeConfig {
   model: 'claude-sonnet-4-20250514' | 'claude-3-haiku-20240307';
   maxTokensPerRequest: number;          // Default: 4096
+
+  // NEW: Agentic capabilities configuration
+  enableExtendedThinking: boolean;      // Enable thinking blocks
+  enableToolUse: boolean;               // Enable bounded data exploration
+  enableMultiTurn: boolean;             // Enable iterative analysis
+  maxThinkingTokens?: number;           // Limit thinking token usage (default: 4000)
+  maxToolCalls?: number;                // Limit tool calls per request (default: 5)
+  maxConversationTurns?: number;        // Limit multi-turn iterations (default: 2)
+
   monthlyBudgetUsd?: number;            // Optional spending cap
   fallbackToRulesOnly: boolean;         // If API unavailable, continue without AI
   maxRetries: number;                   // Default: 3
@@ -810,9 +852,19 @@ interface ClaudeConfig {
 interface UsageStats {
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalThinkingTokens: number;          // NEW: Track thinking separately
+  totalToolCalls: number;               // NEW: Track tool usage
   totalRequests: number;
   estimatedCostUsd: number;
   byOperation: Record<string, OperationStats>;
+  byMode: Record<AnalysisMode, OperationStats>;  // NEW: Track by mode
+}
+
+interface AnalysisConfig {
+  mode: AnalysisMode;
+  maxThinkingTokens?: number;
+  tools?: Tool[];
+  maxTurns?: number;
 }
 ```
 
@@ -876,44 +928,143 @@ When Claude API is unavailable:
 3. Mark results as "AI analysis unavailable"
 4. Don't fail the entire audit
 
+**Data Exploration Tools:**
+
+Define tools Claude can use to explore HubSpot data during analysis:
+
+```typescript
+// Example: Tools for contact analysis
+const contactExplorationTools = [
+  {
+    name: "get_contact_details",
+    description: "Get detailed contact information for investigation",
+    input_schema: { type: "object", properties: { contactId: { type: "string" } } }
+  },
+  {
+    name: "get_contact_engagement",
+    description: "Get engagement history to assess contact value",
+    input_schema: { type: "object", properties: { contactId: { type: "string" } } }
+  },
+  {
+    name: "get_associated_records",
+    description: "Get deals, companies, and other associations",
+    input_schema: { type: "object", properties: { contactId: { type: "string" }, objectType: { type: "string" } } }
+  },
+  {
+    name: "search_similar_contacts",
+    description: "Find contacts with similar properties",
+    input_schema: { type: "object", properties: { criteria: { type: "object" }, limit: { type: "number" } } }
+  }
+];
+```
+
+**Decision Matrix for Mode Selection:**
+
+```typescript
+function selectAnalysisMode(auditType: string, context: AnalysisContext): AnalysisMode {
+  // Rule-based first (free and fast)
+  if (context.isObvious && context.highConfidence) {
+    return 'simple';  // Just structured output
+  }
+
+  // Extended thinking for ambiguous cases
+  if (context.requiresReasoning && context.mediumComplexity) {
+    return 'reasoning';  // Add thinking
+  }
+
+  // Exploration for business judgment
+  if (context.requiresContext && context.highImpact) {
+    return 'exploratory';  // Add thinking + tools
+  }
+
+  // Iterative for strategic decisions
+  if (context.strategic && context.multiFactored) {
+    return 'iterative';  // Add thinking + tools + multi-turn
+  }
+
+  return 'simple';  // Default to cheapest
+}
+```
+
 **Tasks:**
 1. Create ClaudeService class wrapping `@anthropic-ai/sdk`
-2. Implement model selection logic based on operation type
-3. Design prompt templates for each analysis type
-4. Implement tool_use for structured JSON output
-5. Build context window chunking for large datasets
-6. Add retry logic with exponential backoff
-7. Implement token usage tracking and cost estimation
-8. Add budget enforcement (optional)
-9. Implement fallback to rules-only mode
-10. Handle rate limits gracefully (respect Retry-After)
-11. Write tests with mocked responses
-12. Add input sanitization for prompt safety
+2. **NEW:** Implement analysis mode selection logic (simple vs reasoning vs exploratory vs iterative)
+3. **NEW:** Define tool schemas for data exploration (contacts, companies, deals, properties)
+4. **NEW:** Implement extended thinking support with token limits and budget controls
+5. **REVISED:** Design prompt templates for each analysis type AND mode
+6. Implement tool_use for structured JSON output
+7. **NEW:** Implement multi-turn conversation handler for iterative analysis (max 2 turns)
+8. Build context window chunking for large datasets
+9. Add retry logic with exponential backoff
+10. **REVISED:** Implement token usage tracking (including thinking tokens and tool calls)
+11. **REVISED:** Add budget enforcement covering thinking tokens
+12. Implement fallback to rules-only mode
+13. Handle rate limits gracefully (respect Retry-After)
+14. **NEW:** Create decision matrix for when to use each analysis mode
+15. Write tests with mocked responses
+16. Add input sanitization for prompt safety
 
 **Acceptance Criteria:**
 - [ ] Analysis prompts include company context from config
 - [ ] Responses are valid JSON via tool_use (not string parsing)
+- [ ] **NEW:** Extended thinking can be enabled/disabled per analysis type
+- [ ] **NEW:** Tool definitions allow Claude to explore contact/company data during analysis
+- [ ] **NEW:** Multi-turn conversations work for iterative refinement (max 2 turns)
+- [ ] **NEW:** Mode selection logic documented and testable
+- [ ] **NEW:** Cost estimates include thinking tokens and tool calls
 - [ ] Large datasets handled via chunking without errors
 - [ ] Retries handle transient API failures
-- [ ] Token usage is logged for cost monitoring
-- [ ] Cost estimate available before running analysis
+- [ ] Token usage is logged for cost monitoring (including thinking tokens by mode)
+- [ ] Budget enforcement works for total cost (base + thinking)
 - [ ] Fallback to rules-only works when API unavailable
 - [ ] Clear errors when API key is invalid/missing
+- [ ] **NEW:** Decision matrix clearly documents when to use each mode (add to CLAUDE.md)
 
-**Estimated Effort**: Medium-Large
+**Estimated Effort**: Large (increased from Medium-Large to account for agentic infrastructure)
+
+**Rationale for Changes:**
+
+Epic 5 is the **foundation for all AI-powered audits**. By properly implementing agentic capabilities here:
+1. **Enable better analysis quality** - Extended thinking for complex reasoning
+2. **Allow bounded exploration** - Claude can inspect specific records during duplicate detection
+3. **Support iterative refinement** - Multi-turn for strategic recommendations
+4. **Maintain cost control** - Explicit mode selection prevents overuse of expensive features
+5. **Establish the pattern** - Future audits inherit these capabilities automatically
+6. **No frameworks needed** - All native Claude API features, no external dependencies
 
 ---
 
 ### Epic 6: Data Quality Audit
 
-**Objective**: First audit module - detect data quality issues in contacts.
+**Objective**: First audit module - detect data quality issues in contacts using **two-phase analysis** (rule-based first, then agentic AI for ambiguous cases).
+
+**Key Enhancement**: This epic establishes the **pattern for all future audits**: cheap rule-based checks handle obvious cases, then Claude's agentic capabilities (extended thinking + data exploration) analyze ambiguous cases that require judgment.
+
+**Two-Phase Analysis Approach:**
+
+```
+Phase 1: Rule-Based (Fast, Free)
+├─ Missing required fields → HIGH confidence
+├─ Invalid email/phone format → HIGH confidence
+├─ Stale contacts (no activity X days) → HIGH confidence
+└─ Obvious typos (regex patterns) → HIGH confidence
+
+Phase 2: Agentic AI (Selective, Cost-Effective)
+├─ Ambiguous typos ("Jon Smith" vs "John Smith") → REASONING mode
+├─ Semantic anomalies (title doesn't match industry) → REASONING mode
+├─ Context-dependent issues (is this company name valid?) → EXPLORATORY mode
+└─ Pattern detection across related records → EXPLORATORY mode
+```
 
 **Issues Detected:**
-1. **Missing Required Fields**: Based on `config.rules.required_contact_fields`
-2. **Invalid Formats**: Email, phone, URL validation
-3. **Stale Data**: No activity in X days (configurable)
-4. **Inconsistent Values**: Casing, formatting issues
-5. **AI-Detected Issues**: Typos, anomalies Claude identifies
+1. **Missing Required Fields**: Based on `config.rules.required_contact_fields` (RULE-BASED)
+2. **Invalid Formats**: Email, phone, URL validation (RULE-BASED)
+3. **Stale Data**: No activity in X days (RULE-BASED)
+4. **Obvious Typos**: Regex-based detection (RULE-BASED)
+5. **Ambiguous Typos**: "Jon" vs "John", "Inc" vs "Inc." (AGENTIC - REASONING)
+6. **Semantic Anomalies**: Job title doesn't match industry context (AGENTIC - REASONING)
+7. **Context-Dependent Issues**: Is this company name legitimate? (AGENTIC - EXPLORATORY)
+8. **Cross-Record Patterns**: Similar issues across related contacts (AGENTIC - EXPLORATORY)
 
 **Audit Module Interface:**
 ```typescript
@@ -939,43 +1090,201 @@ interface AuditResult {
     issues_found: number;
     by_severity: Record<Severity, number>;
     by_type: Record<string, number>;
+    by_detection_method: {               // NEW: Track how issues were found
+      rule_based: number;
+      ai_reasoning: number;
+      ai_exploratory: number;
+    };
+    ai_cost_usd: number;                 // NEW: Track cost of AI analysis
   };
   issues: AuditIssue[];
-  ai_insights: string;  // Natural language summary from Claude
+  ai_insights: {                         // ENHANCED: Structured AI insights
+    summary: string;
+    patterns_detected: string[];
+    recommendations: string[];
+    thinking_summary?: string;           // NEW: Key points from extended thinking
+  };
+}
+
+interface AuditIssue {
+  id: string;
+  contact_id: string;
+  type: string;
+  severity: 'low' | 'medium' | 'high';
+  description: string;
+  current_value?: any;
+  suggested_fix?: any;
+  confidence: 'high' | 'medium' | 'low';
+  detection_method: 'rule' | 'ai_reasoning' | 'ai_exploratory';  // NEW
+  reasoning?: string;                    // NEW: AI's reasoning (if applicable)
+}
+```
+
+**Implementation Pattern:**
+
+```typescript
+class DataQualityAudit implements AuditModule {
+  async run(context: AuditContext): Promise<AuditResult> {
+    const issues: AuditIssue[] = [];
+
+    // PHASE 1: Rule-based checks (fast, free, high-confidence)
+    const ruleBasedIssues = await this.runRuleBasedChecks(contacts, context.config);
+    issues.push(...ruleBasedIssues);
+
+    // PHASE 2: Identify ambiguous cases that need AI analysis
+    const ambiguousCases = this.identifyAmbiguousCases(contacts, ruleBasedIssues);
+
+    if (ambiguousCases.length > 0) {
+      // Group by analysis mode needed
+      const reasoningCases = ambiguousCases.filter(c => c.needsReasoning);
+      const exploratoryCases = ambiguousCases.filter(c => c.needsExploration);
+
+      // Batch process each group
+      if (reasoningCases.length > 0) {
+        const aiIssues = await context.claude.analyzeWithReasoning(
+          this.buildPrompt(reasoningCases, context.config),
+          this.getReasoningTools(),
+          { mode: 'reasoning', maxThinkingTokens: 2000 }
+        );
+        issues.push(...aiIssues);
+      }
+
+      if (exploratoryCases.length > 0) {
+        const aiIssues = await context.claude.analyzeWithExploration(
+          this.buildPrompt(exploratoryCases, context.config),
+          this.getExplorationTools(),
+          { mode: 'exploratory', maxThinkingTokens: 3000, tools: contactExplorationTools }
+        );
+        issues.push(...aiIssues);
+      }
+    }
+
+    // Generate summary
+    return this.buildResult(issues, context);
+  }
+
+  private identifyAmbiguousCases(contacts: Contact[], ruleIssues: AuditIssue[]): AmbiguousCase[] {
+    // Logic to identify cases that need AI judgment
+    // Example: Names with potential typos, unclear company names, semantic mismatches
+  }
+}
+```
+
+**Tools for Exploratory Analysis:**
+
+```typescript
+const dataQualityExplorationTools = [
+  {
+    name: "get_contact_company_details",
+    description: "Get company information to validate if contact data makes sense",
+    input_schema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        companyId: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "search_similar_contacts",
+    description: "Find contacts with similar names/data to detect patterns",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        company: { type: "string" },
+        limit: { type: "number" }
+      }
+    }
+  },
+  {
+    name: "get_industry_context",
+    description: "Get context about whether job title/company combination is typical",
+    input_schema: {
+      type: "object",
+      properties: {
+        jobTitle: { type: "string" },
+        industry: { type: "string" }
+      }
+    }
+  }
+];
+```
+
+**Cost Control Strategy:**
+
+```typescript
+interface DataQualityConfig {
+  // Control which AI features to use
+  enableAmbiguousAnalysis: boolean;     // Default: true
+  maxAiCostPerAudit: number;            // Default: $2.00
+
+  // Thresholds for triggering AI analysis
+  minAmbiguousCasesForAI: number;       // Default: 10 (don't use AI for <10 cases)
+  maxAmbiguousCasesPerRun: number;      // Default: 100 (cap cost)
+
+  // What to analyze with AI
+  analyzeNameTypos: boolean;            // Default: true
+  analyzeSemanticAnomalies: boolean;    // Default: true (requires exploratory mode)
+  analyzeCrossRecordPatterns: boolean;  // Default: false (expensive)
 }
 ```
 
 **Tasks:**
-1. Define AuditModule interface
-2. Implement DataQualityAudit module
-3. Add validation rules for common fields (email, phone, URL)
-4. Integrate with Claude for AI analysis
-5. Generate structured results
-6. Write comprehensive tests with fixture data
+1. Define AuditModule interface with detection_method tracking
+2. Implement DataQualityAudit module with two-phase approach
+3. Add rule-based validation for common fields (email, phone, URL, required fields)
+4. **NEW:** Implement ambiguous case identification logic
+5. **NEW:** Integrate Claude with REASONING mode for ambiguous typos and semantic anomalies
+6. **NEW:** Integrate Claude with EXPLORATORY mode for context-dependent validation
+7. **NEW:** Add data exploration tools for contact/company context
+8. **NEW:** Implement cost control and batching for AI analysis
+9. Generate structured results with detection method tracking
+10. Write comprehensive tests with fixture data covering both phases
 
 **Acceptance Criteria:**
-- [ ] Detects missing required fields per config
-- [ ] Validates email and phone formats
-- [ ] Identifies stale contacts based on config threshold
-- [ ] Claude provides additional insights beyond rule-based checks
-- [ ] Results include both structured data and natural language summary
-- [ ] Performance: 1000 contacts analyzed in <30s
+- [ ] Rule-based checks detect all obvious issues (missing fields, invalid formats, stale data)
+- [ ] Rule-based issues have HIGH confidence automatically
+- [ ] Ambiguous cases are correctly identified and routed to appropriate AI mode
+- [ ] AI analysis uses REASONING mode for pattern detection and ambiguous matching
+- [ ] AI analysis uses EXPLORATORY mode for context-dependent validation
+- [ ] **NEW:** Extended thinking is captured and summarized in results
+- [ ] **NEW:** Data exploration tools allow Claude to investigate related records
+- [ ] **NEW:** Cost tracking shows breakdown by detection method
+- [ ] **NEW:** AI analysis is skipped if cost budget exceeded
+- [ ] **NEW:** Results clearly distinguish rule-based vs AI-detected issues
+- [ ] Claude provides insights with reasoning captured
+- [ ] Performance: 1000 contacts analyzed in <30s (rule-based), AI analysis time varies by ambiguous case count
 
-**Estimated Effort**: Medium-Large
+**Estimated Effort**: Large (increased from Medium-Large to account for two-phase architecture)
+
+**Rationale for Changes:**
+
+This epic establishes the **fundamental pattern for the entire tool**:
+1. **Cost-effective by default** - Rule-based checks are free and handle 80%+ of cases
+2. **AI where it adds value** - Only use expensive agentic features for ambiguous cases
+3. **Transparent decision-making** - Capture and show AI's reasoning process
+4. **Bounded exploration** - Tools allow Claude to investigate, but with limits
+5. **Measurable ROI** - Track cost per detection method to justify AI usage
+
+Once this pattern works in Epic 6, all future audit types (Epics 9-13) can follow the same structure.
 
 ---
 
 ### Epic 7: Action Plan System
 
-**Objective**: Generate actionable fix plans from audit results. Plans are **proposals only** - no changes are made until the user explicitly executes them.
+**Objective**: Generate actionable fix plans from audit results with **AI reasoning captured**. Plans are **proposals only** - no changes are made until the user explicitly executes them.
+
+**Key Enhancement**: When actions are generated from AI-detected issues, capture and include the AI's reasoning, confidence factors, and thinking summary. This transparency helps users understand why each action is recommended and builds trust in AI-generated recommendations.
 
 **Key Principle**: This epic is about **generating and presenting plans**, not executing them.
 The user must be able to:
 1. Review the full plan before any action
-2. Filter actions by confidence level
+2. Filter actions by confidence level and detection method
 3. Export the plan for offline review
 4. Modify or reject specific actions
 5. Defer execution indefinitely (plan files persist)
+6. **NEW:** Understand AI's reasoning for each recommendation
 
 **Action Plan Structure:**
 ```typescript
@@ -988,10 +1297,22 @@ interface ActionPlan {
     total_actions: number;
     by_type: Record<ActionType, number>;
     by_confidence: Record<ConfidenceLevel, number>;
+    by_detection_method: {               // NEW: Track source of actions
+      rule_based: number;
+      ai_reasoning: number;
+      ai_exploratory: number;
+    };
     estimated_api_calls: number;
+    estimated_ai_cost_usd: number;       // NEW: Cost of AI analysis that generated plan
   };
 
   actions: Action[];
+
+  ai_context?: {                         // NEW: Overall AI insights
+    patterns_identified: string[];
+    strategic_recommendations: string[];
+    thinking_summary: string;
+  };
 }
 
 interface Action {
@@ -1012,10 +1333,17 @@ interface Action {
     new_value?: any;
   };
 
-  reasoning: string;       // Why this action is recommended
-  reversible: boolean;     // Can this be undone?
-  requires_confirmation: boolean;  // Extra confirmation for destructive actions
-  dependencies?: string[]; // Action IDs that must complete first
+  reasoning: string;                     // Why this action is recommended
+  detection_method: 'rule' | 'ai_reasoning' | 'ai_exploratory';  // NEW
+  ai_reasoning?: {                       // NEW: Enhanced reasoning for AI-generated actions
+    primary_reason: string;
+    confidence_factors: string[];        // What increases/decreases confidence
+    thinking_excerpt?: string;           // Key insight from extended thinking
+    explored_alternatives?: string[];    // Other options considered
+  };
+  reversible: boolean;                   // Can this be undone?
+  requires_confirmation: boolean;        // Extra confirmation for destructive actions
+  dependencies?: string[];               // Action IDs that must complete first
 }
 
 // Action type reversibility matrix
@@ -1038,22 +1366,38 @@ type ActionType =
 - Example: `data-quality-2025-01-15T10-30-00.json`
 
 **Tasks:**
-1. Define action plan types
+1. Define action plan types with AI reasoning fields
 2. Implement PlanBuilder that converts audit results to actions
-3. Add confidence scoring logic
-4. Implement plan serialization (save/load JSON)
-5. Create plan preview display in CLI
-6. Add filtering options (by confidence, by type)
+3. Add confidence scoring logic (rule-based = high, AI-based = varies)
+4. **NEW:** Implement AI reasoning extraction from audit results
+5. **NEW:** Capture thinking summaries and confidence factors
+6. Implement plan serialization (save/load JSON) with AI context
+7. Create plan preview display in CLI showing detection method
+8. Add filtering options (by confidence, by type, by detection method)
 
 **Acceptance Criteria:**
 - [ ] Audit results automatically generate action plans
 - [ ] Each action has clear reasoning
+- [ ] **NEW:** AI-generated actions include confidence_factors and thinking excerpts
+- [ ] **NEW:** Plan summary shows breakdown by detection method (rule vs AI)
+- [ ] **NEW:** AI context section captures overall patterns and strategic recommendations
 - [ ] Actions are scored by confidence
 - [ ] Plans save to JSON files with readable format
 - [ ] CLI shows clear preview of what will change
 - [ ] Can filter to high-confidence actions only
+- [ ] **NEW:** Can filter by detection method (--rule-based-only, --ai-only)
+- [ ] **NEW:** Plan display highlights AI reasoning when present
 
 **Estimated Effort**: Medium
+
+**Rationale for Changes:**
+
+Capturing AI reasoning in action plans provides:
+1. **Transparency** - Users understand why AI recommended each action
+2. **Trust building** - Seeing thinking process builds confidence in recommendations
+3. **Debugging** - If AI makes mistakes, reasoning helps identify patterns
+4. **Learning** - Users learn what makes a high vs low confidence recommendation
+5. **Audit trail** - Full record of decision-making for compliance/review
 
 ---
 
@@ -1172,6 +1516,8 @@ hubspot-audit executions list
 
 **Acceptance Criteria:**
 - [ ] Execution requires explicit confirmation
+- [ ] **NEW:** Confirmation prompt shows AI confidence scores and detection methods
+- [ ] **NEW:** AI-generated actions display key reasoning during confirmation
 - [ ] Non-reversible actions (merge) require extra confirmation
 - [ ] Concurrent executions prevented via lock
 - [ ] Original values captured before any changes
@@ -1185,6 +1531,14 @@ hubspot-audit executions list
 - [ ] Execution history preserved for 30 days (with size limit)
 
 **Estimated Effort**: Large
+
+**Rationale for Changes:**
+
+Minor enhancements to show AI reasoning during execution confirmation. When a user is about to execute AI-generated actions, they should see:
+- Confidence scores clearly displayed
+- Detection method (rule-based vs AI)
+- Brief reasoning for high-impact actions
+This helps users make informed decisions before proceeding with potentially risky changes.
 
 ---
 
@@ -1276,158 +1630,1603 @@ is established and adding new audit types becomes straightforward.
 
 ### Epic 9: Duplicate Detection Audit
 
+**Objective**: Detect and recommend merges for duplicate contacts using **three-tier analysis** that maximizes accuracy while controlling costs.
+
+**Key Enhancement**: This audit is the **showcase for agentic capabilities**. Duplicate detection requires complex judgment: exact matches are obvious (rule-based), fuzzy matches need reasoning (extended thinking), and merge decisions need investigation (data exploration). This epic demonstrates the full power of the two-phase architecture established in Epic 6.
+
+**Three-Tier Detection Strategy:**
+
+```
+Tier 1: Exact Matches (Rule-Based, HIGH confidence)
+├─ Same email address → Merge (99% confidence)
+├─ Same phone + same company → Merge (95% confidence)
+└─ Same name + same email domain → Investigate (Tier 2)
+
+Tier 2: Fuzzy Matches (REASONING mode, MEDIUM confidence)
+├─ Similar names (Levenshtein < 3) + same company → AI evaluates (extended thinking)
+├─ Same name + different email domains → AI analyzes relationship
+├─ Similar company names + related people → Pattern detection needed
+└─ Output: Match probability + reasoning
+
+Tier 3: Merge Decision (EXPLORATORY mode, context-dependent confidence)
+├─ AI investigates both records (deals, engagement, associations)
+├─ Determines primary record (most complete, most recent activity)
+├─ Assesses merge risk (data loss, integration impact)
+└─ Output: Merge recommendation + detailed reasoning + risk assessment
+```
+
+**Why This Three-Tier Approach:**
+1. **Tier 1 is free** - Rule-based exact matches handle ~60% of duplicates
+2. **Tier 2 is selective** - Only apply expensive thinking to ambiguous cases (~30%)
+3. **Tier 3 is strategic** - Only investigate when merge decision is non-obvious (~10%)
+
 **Detects:**
-- Exact email matches
-- Fuzzy name matching (Levenshtein distance)
-- Same company + similar name
-- Phone number matches
+1. **Exact Matches** (RULE-BASED):
+   - Identical email addresses
+   - Same phone number + same company ID
+   - Same normalized name + same company ID
+
+2. **Fuzzy Matches** (AGENTIC - REASONING):
+   - Similar names (Levenshtein distance < 3) + same company
+   - Same name + different company (could be typo in company name)
+   - Same email domain + similar names (colleagues or same person?)
+   - Nickname variations ("Bob" vs "Robert", "Mike" vs "Michael")
+
+3. **Contextual Matches** (AGENTIC - EXPLORATORY):
+   - Related contacts that might be duplicates (investigation needed)
+   - Contacts with conflicting data (which record is correct?)
+   - Historical duplicates (previously merged, now re-created)
+
+**Duplicate Pair Analysis Structure:**
+
+```typescript
+interface DuplicatePair {
+  id: string;
+  contact1: Contact;
+  contact2: Contact;
+  match_type: 'exact' | 'fuzzy' | 'contextual';
+  confidence: number;                    // 0-100
+  detection_method: 'rule' | 'ai_reasoning' | 'ai_exploratory';
+
+  match_factors: {
+    email_match: boolean;
+    phone_match: boolean;
+    name_similarity: number;             // Levenshtein score
+    company_match: boolean;
+    same_lifecycle_stage: boolean;
+  };
+
+  ai_analysis?: {
+    is_duplicate: boolean;
+    confidence_explanation: string;
+    thinking_summary: string;            // Key reasoning from extended thinking
+    investigated_factors: string[];      // What Claude looked at
+    red_flags: string[];                 // Reasons for doubt
+  };
+
+  merge_recommendation?: {
+    should_merge: boolean;
+    primary_contact_id: string;          // Which record to keep
+    rationale: string;
+    risk_assessment: 'low' | 'medium' | 'high';
+    data_to_preserve: string[];          // Fields to copy from secondary
+    potential_issues: string[];
+  };
+}
+```
+
+**Implementation Pattern:**
+
+```typescript
+class DuplicateAudit implements AuditModule {
+  async run(context: AuditContext): Promise<AuditResult> {
+    // TIER 1: Rule-based exact matching (fast, free, HIGH confidence)
+    const exactMatches = await this.findExactMatches(contacts);
+    const tier1Pairs = exactMatches.map(pair => ({
+      ...pair,
+      match_type: 'exact',
+      confidence: 95,
+      detection_method: 'rule',
+      merge_recommendation: this.simplemergeLogic(pair)  // Rule-based: keep most recent
+    }));
+
+    // TIER 2: Fuzzy matching candidates (need AI reasoning)
+    const fuzzyc Candidates = await this.findFuzzyCandidates(contacts, exactMatches);
+
+    let tier2Pairs = [];
+    if (fuzzyCandidates.length > 0) {
+      // Batch analyze fuzzy matches with REASONING mode
+      tier2Pairs = await context.claude.analyzeWithReasoning(
+        this.buildFuzzyMatchPrompt(fuzzyCandidates, context.config),
+        this.getFuzzyMatchTools(),
+        { mode: 'reasoning', maxThinkingTokens: 3000 }
+      );
+    }
+
+    // TIER 3: Contextual investigation for complex cases (need data exploration)
+    const complexCases = tier2Pairs.filter(p => p.ai_analysis.confidence < 0.8);
+
+    let tier3Pairs = [];
+    if (complexCases.length > 0 && complexCases.length < 20) {  // Cost control
+      // Investigate each complex case with EXPLORATORY mode
+      tier3Pairs = await context.claude.analyzeWithExploration(
+        this.buildMergeDecisionPrompt(complexCases, context.config),
+        this.getMergeInvestigationTools(),
+        {
+          mode: 'exploratory',
+          maxThinkingTokens: 4000,
+          tools: duplicateInvestigationTools,
+          maxToolCalls: 10
+        }
+      );
+    }
+
+    const allPairs = [...tier1Pairs, ...tier2Pairs, ...tier3Pairs];
+    return this.buildResult(allPairs, context);
+  }
+}
+```
+
+**Tools for Duplicate Investigation:**
+
+```typescript
+const duplicateInvestigationTools = [
+  {
+    name: "compare_engagement_history",
+    description: "Compare engagement metrics between two contacts to determine primary",
+    input_schema: {
+      type: "object",
+      properties: {
+        contact1Id: { type: "string" },
+        contact2Id: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "get_deal_associations",
+    description: "Check which contact has more/recent deal associations",
+    input_schema: {
+      type: "object",
+      properties: {
+        contact1Id: { type: "string" },
+        contact2Id: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "get_data_completeness",
+    description: "Compare data completeness between two contacts",
+    input_schema: {
+      type: "object",
+      properties: {
+        contact1Id: { type: "string" },
+        contact2Id: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "check_list_memberships",
+    description: "Compare list memberships to assess which contact is more integrated",
+    input_schema: {
+      type: "object",
+      properties: {
+        contact1Id: { type: "string" },
+        contact2Id: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "get_historical_merges",
+    description: "Check if these contacts were previously merged and re-created",
+    input_schema: {
+      type: "object",
+      properties: {
+        contact1Id: { type: "string" },
+        contact2Id: { type: "string" }
+      }
+    }
+  }
+];
+```
+
+**Merge Decision Criteria (for AI):**
+
+When analyzing complex duplicate cases, Claude should consider:
+```
+PRIMARY RECORD SELECTION:
+1. Most complete data (fewer null fields)
+2. Most recent activity (lastmodifieddate, latest email open)
+3. More deal associations
+4. More list memberships
+5. Marketing contact status (prefer marketing-enabled)
+6. Lifecycle stage (prefer further along)
+
+RISK ASSESSMENT:
+- LOW: Contacts have non-conflicting data, clear primary
+- MEDIUM: Some conflicting fields, but resolvable
+- HIGH: Significant conflicts, associations on both, or historical merge detected
+
+MERGE RECOMMENDATION:
+- should_merge: true if confidence > 80%
+- primary_contact_id: Based on criteria above
+- data_to_preserve: Fields from secondary that should be copied
+- potential_issues: Warnings about data loss, conflicts, integration impacts
+```
+
+**Cost Control Strategy:**
+
+```typescript
+interface DuplicateDetectionConfig {
+  // Tier 1: Rule-based (always enabled, free)
+  exactMatchThreshold: number;          // Default: 1.0 (exact match only)
+
+  // Tier 2: Fuzzy matching with AI
+  enableFuzzyMatching: boolean;         // Default: true
+  fuzzyMatchThreshold: number;          // Default: 0.85 (85% similar)
+  maxFuzzyPairsForAI: number;           // Default: 100 (cost control)
+
+  // Tier 3: Deep investigation
+  enableMergeInvestigation: boolean;    // Default: true
+  maxInvestigationsPerRun: number;      // Default: 20 (expensive)
+  minConfidenceForInvestigation: number;  // Default: 0.5 (only investigate uncertain cases)
+
+  // Overall
+  maxAiCostPerAudit: number;            // Default: $5.00 (higher for duplicates)
+}
+```
 
 **Actions Generated:**
 - Merge recommendations with primary record selection
-- Confidence scoring based on match quality
+- Confidence scoring based on match quality and AI analysis
+- Risk assessment for each merge (low/medium/high)
+- Data preservation instructions (which fields to copy from secondary)
+- **NOTE: Merge actions are NOT REVERSIBLE - require extra confirmation**
 
 **Tasks:**
-1. Implement DuplicateAudit module
-2. Add exact matching logic
-3. Add fuzzy matching with configurable threshold
-4. Use Claude for merge recommendations
-5. Generate merge action plans
+1. Implement DuplicateAudit module with three-tier architecture
+2. Add rule-based exact matching (email, phone, name+company)
+3. Add fuzzy matching with Levenshtein distance
+4. **NEW:** Implement ambiguous case identification for Tier 2
+5. **NEW:** Integrate Claude with REASONING mode for fuzzy match analysis
+6. **NEW:** Integrate Claude with EXPLORATORY mode for merge decisions
+7. **NEW:** Implement duplicate investigation tools (engagement, deals, completeness, lists)
+8. **NEW:** Add merge risk assessment logic
+9. **NEW:** Add primary record selection algorithm (data completeness + recency)
+10. **NEW:** Implement cost control and batching for AI analysis
+11. Generate merge action plans with NON-REVERSIBLE warnings
+12. Write comprehensive tests covering all three tiers
 
-**Estimated Effort**: Medium
+**Acceptance Criteria:**
+- [ ] Tier 1 (rule-based) detects exact matches with HIGH confidence
+- [ ] Tier 2 (REASONING) analyzes fuzzy matches with extended thinking
+- [ ] Tier 3 (EXPLORATORY) investigates complex cases using tools
+- [ ] **NEW:** AI reasoning explains why two contacts are/aren't duplicates
+- [ ] **NEW:** Primary record selection is justified with clear criteria
+- [ ] **NEW:** Risk assessment identifies potential data loss or conflicts
+- [ ] **NEW:** Investigation tools allow Claude to compare engagement, deals, completeness
+- [ ] **NEW:** Cost tracking shows breakdown by tier
+- [ ] **NEW:** AI analysis skipped if budget exceeded or case count too high
+- [ ] Merge recommendations include primary contact selection
+- [ ] All merge actions marked as NON-REVERSIBLE
+- [ ] Performance: 1000 contacts analyzed in <60s (Tier 1), AI time varies by fuzzy/complex count
+- [ ] **NEW:** Nickname variations ("Bob"/"Robert") correctly identified as potential duplicates
+
+**Estimated Effort**: Large (increased from Medium to account for three-tier architecture)
+
+**Rationale for Changes:**
+
+Duplicate detection is the **perfect showcase** for agentic capabilities because:
+1. **Clear value proposition** - Merging duplicates directly improves data quality
+2. **Judgment required** - Fuzzy matches need reasoning ("Is 'Jon Smith' the same as 'John Smith'?")
+3. **Investigation needed** - Merge decisions benefit from exploring engagement, deals, etc.
+4. **High stakes** - Merges are irreversible, so good reasoning builds trust
+5. **Cost justification** - Users will pay for AI if it prevents wrong merges
+6. **Measurable success** - Easy to evaluate: "Did it correctly identify this as a duplicate?"
+
+The three-tier approach ensures:
+- Fast, free detection for obvious cases
+- Strategic use of expensive agentic features
+- Maximum accuracy where it matters most (merge decisions)
+- Transparent reasoning that builds user confidence
 
 ---
 
 ### Epic 10: Property Consistency Audit
 
+**Objective**: Detect property inconsistencies and recommend standardization using **extended thinking for semantic equivalence**.
+
+**Key Enhancement**: Property standardization requires **semantic understanding** - "Tech" and "Technology" are equivalent, but "Mobile" and "Mobility" might not be. Extended thinking allows Claude to reason about meaning and context, producing better standardization recommendations than simple fuzzy matching.
+
+**Two-Phase Analysis:**
+
+```
+Phase 1: Rule-Based (Obvious Issues)
+├─ Exact duplicates with different casing ("tech" vs "Tech") → HIGH confidence
+├─ Known mappings from config ("IT" → "Technology") → HIGH confidence
+├─ Empty properties (<1% filled) → HIGH confidence (flag for review)
+└─ Obvious typos (simple Levenshtein with high similarity) → HIGH confidence
+
+Phase 2: Agentic AI (Semantic Analysis - REASONING mode)
+├─ Semantic equivalence ("Tech" vs "Technology" vs "IT Services") → Extended thinking
+├─ Industry-specific variations ("SaaS" vs "Software as a Service") → Context-aware
+├─ Abbreviation detection ("Inc" vs "Incorporated" vs "Inc.") → Pattern recognition
+└─ Context-dependent standardization (keep variation vs consolidate) → Business judgment
+```
+
 **Detects:**
-- Value variations ("Tech" vs "Technology" vs "IT")
-- Low-population properties (<5% filled)
-- Unused custom properties
-- Inconsistent formatting/casing
+1. **Value Variations** (mixed rule-based and agentic):
+   - Casing differences: "tech" vs "Tech" vs "TECH" (RULE-BASED)
+   - Semantic equivalents: "Tech" vs "Technology" vs "IT" (AGENTIC - REASONING)
+   - Abbreviations: "Inc." vs "Inc" vs "Incorporated" (AGENTIC - REASONING)
+   - Typos: "Technolgy" vs "Technology" (RULE-BASED if Levenshtein < 2, else AGENTIC)
+
+2. **Low-Population Properties** (RULE-BASED):
+   - Custom properties with <5% fill rate
+   - Properties never used in workflows or reports
+   - Duplicate properties (same semantic meaning, different names)
+
+3. **Unused Custom Properties** (RULE-BASED):
+   - Properties created but never populated
+   - Properties with only default values
+   - Obsolete properties from old processes
+
+4. **Inconsistent Formatting** (RULE-BASED):
+   - Phone numbers: various formats vs E.164
+   - Dates: inconsistent formats
+   - URLs: http vs https, www vs non-www
+
+**Property Analysis Structure:**
+
+```typescript
+interface PropertyAnalysis {
+  property_name: string;
+  type: 'standard' | 'custom';
+  usage_stats: {
+    total_records: number;
+    populated_records: number;
+    fill_rate: number;
+    unique_values: number;
+  };
+
+  issues: PropertyIssue[];
+}
+
+interface PropertyIssue {
+  type: 'variation' | 'low_population' | 'unused' | 'formatting';
+  severity: 'low' | 'medium' | 'high';
+  detection_method: 'rule' | 'ai_reasoning';
+
+  // For variation issues
+  value_clusters?: ValueCluster[];
+
+  // For AI-analyzed variations
+  ai_analysis?: {
+    are_semantically_equivalent: boolean;
+    reasoning: string;
+    thinking_summary: string;
+    recommended_standard_value: string;
+    confidence: number;
+    context_notes: string[];            // Industry-specific considerations
+  };
+}
+
+interface ValueCluster {
+  values: string[];
+  count: number;
+  recommended_standard?: string;
+  equivalence_type: 'exact' | 'casing' | 'abbreviation' | 'semantic' | 'typo';
+}
+```
+
+**Implementation Pattern:**
+
+```typescript
+class PropertyAudit implements AuditModule {
+  async run(context: AuditContext): Promise<AuditResult> {
+    const propertyAnalyses: PropertyAnalysis[] = [];
+
+    // Analyze each property
+    for (const property of properties) {
+      const analysis = await this.analyzeProperty(property, contacts);
+
+      // PHASE 1: Rule-based checks
+      const ruleIssues = this.detectRuleBasedIssues(analysis);
+
+      // PHASE 2: Identify value variations that need semantic analysis
+      const semanticCandidates = this.identifySemanticVariations(analysis);
+
+      if (semanticCandidates.length > 0) {
+        // Batch analyze with REASONING mode
+        const aiAnalysis = await context.claude.analyzeWithReasoning(
+          this.buildSemanticEquivalencePrompt(semanticCandidates, context.config),
+          this.getPropertyTools(),
+          { mode: 'reasoning', maxThinkingTokens: 2000 }
+        );
+
+        ruleIssues.push(...aiAnalysis);
+      }
+
+      analysis.issues = ruleIssues;
+      propertyAnalyses.push(analysis);
+    }
+
+    return this.buildResult(propertyAnalyses, context);
+  }
+
+  private identifySemanticVariations(analysis: PropertyAnalysis): ValueCluster[] {
+    // Find clusters of values that might be semantically equivalent
+    // Example: ["Tech", "Technology", "IT", "Information Technology"]
+    // Should NOT include: ["Tech", "Teacher"] (different meanings)
+
+    // Use rule-based clustering first (Levenshtein), then send ambiguous clusters to AI
+  }
+}
+```
+
+**Prompt Design for Semantic Analysis:**
+
+The key to property standardization is asking Claude to reason about **meaning and business context**:
+
+```
+You are analyzing property values from a CRM to determine if they are semantically equivalent.
+
+Company Context:
+- Industry: {config.company.industry}
+- Business Model: {config.company.business_model}
+
+Property: "industry"
+Value Cluster: ["Tech", "Technology", "IT", "IT Services", "Information Technology"]
+
+For each pair of values, determine:
+1. Are they semantically equivalent in a business context?
+2. Which value should be the standard (most professional, clearest)?
+3. What confidence do you have in this equivalence?
+4. Are there any industry-specific nuances to consider?
+
+Think through:
+- Would a businessperson consider these interchangeable?
+- Does the company's industry affect the interpretation?
+- Are there subtle meaning differences (e.g., "IT" might mean infrastructure, "Tech" might mean product)?
+```
 
 **Actions Generated:**
-- Standardize values per config mappings
-- Flag unused properties for review
+- Standardize values to recommended canonical form
+- Archive unused properties
+- Fix formatting inconsistencies
+- Consolidate duplicate properties
+
+**Cost Control:**
+
+```typescript
+interface PropertyAuditConfig {
+  // Rule-based (always enabled, free)
+  minFillRatePercent: number;           // Default: 5 (flag if <5% filled)
+  casingSensitive: boolean;             // Default: false
+
+  // AI semantic analysis
+  enableSemanticAnalysis: boolean;      // Default: true
+  minClusterSizeForAI: number;          // Default: 3 (don't analyze tiny clusters)
+  maxClustersPerRun: number;            // Default: 50 (cost control)
+  semanticSimilarityThreshold: number;  // Default: 0.7 (70% similar via embeddings)
+
+  // Overall
+  maxAiCostPerAudit: number;            // Default: $2.00
+}
+```
 
 **Tasks:**
 1. Implement PropertyAudit module
-2. Analyze value distributions
-3. Apply config standardization mappings
-4. Use Claude to detect variations
-5. Generate standardization actions
+2. Analyze value distributions and usage stats
+3. Add rule-based detection (casing, known mappings, fill rate, formatting)
+4. **NEW:** Implement semantic variation detection
+5. **NEW:** Integrate Claude with REASONING mode for equivalence analysis
+6. **NEW:** Add industry context to semantic analysis
+7. Apply config standardization mappings
+8. Generate standardization actions
+9. Write comprehensive tests with semantic equivalence cases
 
-**Estimated Effort**: Medium
+**Acceptance Criteria:**
+- [ ] Rule-based checks detect obvious issues (casing, fill rate, formatting)
+- [ ] **NEW:** Semantic analysis uses extended thinking to reason about equivalence
+- [ ] **NEW:** Industry context influences standardization decisions
+- [ ] **NEW:** Abbreviations correctly identified ("Inc" vs "Incorporated")
+- [ ] **NEW:** AI explains why values are/aren't equivalent
+- [ ] **NEW:** Recommended standard value is justified
+- [ ] Low-population properties flagged for review
+- [ ] Unused properties identified
+- [ ] Standardization actions generated per config mappings
+- [ ] Performance: All properties analyzed in <30s (rule-based), AI time varies by cluster count
+
+**Estimated Effort**: Medium-Large (increased from Medium to account for semantic analysis)
+
+**Rationale for Changes:**
+
+Property standardization benefits from extended thinking because:
+1. **Semantic understanding required** - "Tech" = "Technology" but "Mobile" ≠ "Mobility"
+2. **Context matters** - In fintech, "Mobile" might mean mobile banking (product) vs mobile devices (platform)
+3. **Business judgment** - Should you consolidate or preserve variations?
+4. **Abbreviation complexity** - "Inc" vs "Inc." vs "Incorporated" - which is standard?
+5. **Industry-specific terms** - Healthcare has different terminology than SaaS
+
+Extended thinking allows Claude to reason through these nuances, producing better recommendations than simple fuzzy matching.
 
 ---
 
 ### Epic 11: List Hygiene Audit
 
+**Objective**: Detect list management issues and recommend cleanup, mostly rule-based with light AI for consolidation strategy.
+
+**Key Enhancement**: This audit is **primarily rule-based** (85%+), but AI adds value in recommending **consolidation strategy** when multiple lists have high overlap. Extended thinking helps determine whether to consolidate, keep separate, or create new segmentation logic.
+
+**Mostly Rule-Based Audit:**
+
+```
+Phase 1: Rule-Based (Most Issues)
+├─ Unused lists (no sends in 6+ months) → HIGH confidence
+├─ Lists with bounced/unsubscribed members → HIGH confidence
+├─ Empty lists (0 members) → HIGH confidence
+├─ Broken filter criteria (references deleted properties) → HIGH confidence
+└─ High overlap (>80% shared members) → Flag for Phase 2
+
+Phase 2: Light AI (Consolidation Strategy - REASONING mode, selective)
+├─ Analyze overlapping lists (are they redundant or intentional?)
+├─ Recommend consolidation strategy or new segmentation approach
+└─ Consider business context (list purpose, campaign history)
+```
+
 **Detects:**
-- Unused lists (no activity in 6+ months)
-- High membership overlap between lists
-- Lists with bounced/unsubscribed members
-- Broken filter criteria
+1. **Unused Lists** (RULE-BASED):
+   - No email sends in 6+ months
+   - No workflow associations
+   - Not used in any reports or dashboards
+
+2. **Invalid Members** (RULE-BASED):
+   - Contacts with hard bounces
+   - Unsubscribed contacts in marketing lists
+   - Deleted contacts still in membership
+
+3. **High Overlap** (RULE-BASED detection, AGENTIC strategy):
+   - Lists sharing >80% members
+   - Rule-based: Detect overlap
+   - AI-based: Determine if consolidation makes sense given business context
+
+4. **Broken Configuration** (RULE-BASED):
+   - Filter criteria referencing deleted properties
+   - Invalid workflow associations
+   - Circular dependencies
+
+**List Analysis Structure:**
+
+```typescript
+interface ListAnalysis {
+  list_id: string;
+  list_name: string;
+  list_type: 'static' | 'dynamic';
+  member_count: number;
+  last_used_date?: Date;
+
+  issues: ListIssue[];
+}
+
+interface ListIssue {
+  type: 'unused' | 'invalid_members' | 'high_overlap' | 'broken_config';
+  severity: 'low' | 'medium' | 'high';
+  detection_method: 'rule' | 'ai_reasoning';
+
+  // For overlap issues
+  overlap_analysis?: {
+    overlapping_lists: Array<{
+      list_id: string;
+      list_name: string;
+      shared_members: number;
+      overlap_percentage: number;
+    }>;
+
+    // AI consolidation strategy (if enabled)
+    ai_recommendation?: {
+      should_consolidate: boolean;
+      rationale: string;
+      thinking_summary: string;
+      suggested_approach: string;        // "Merge into X", "Keep separate", "Create new segment"
+      business_justification: string;
+    };
+  };
+}
+```
+
+**Implementation:**
+
+```typescript
+class ListAudit implements AuditModule {
+  async run(context: AuditContext): Promise<AuditResult> {
+    const lists = await context.hubspot.getLists();
+    const analyses: ListAnalysis[] = [];
+
+    for (const list of lists) {
+      const issues = [];
+
+      // PHASE 1: All rule-based checks (fast, free)
+      if (this.isUnused(list)) issues.push(this.createUnusedIssue(list));
+      if (this.hasInvalidMembers(list)) issues.push(await this.createInvalidMembersIssue(list));
+      if (this.hasBrokenConfig(list)) issues.push(this.createBrokenConfigIssue(list));
+
+      const overlaps = this.findHighOverlap(list, lists);
+      if (overlaps.length > 0) {
+        issues.push(this.createOverlapIssue(list, overlaps));
+      }
+
+      analyses.push({ ...list, issues });
+    }
+
+    // PHASE 2: AI consolidation strategy (selective, only for overlap cases)
+    const overlapIssues = analyses.flatMap(a => a.issues.filter(i => i.type === 'high_overlap'));
+
+    if (overlapIssues.length > 0 && overlapIssues.length < 10) {  // Cost control
+      const consolidationStrategies = await context.claude.analyzeWithReasoning(
+        this.buildConsolidationPrompt(overlapIssues, context.config),
+        [],  // No tools needed, just reasoning
+        { mode: 'reasoning', maxThinkingTokens: 1500 }
+      );
+
+      // Attach AI recommendations to overlap issues
+      this.attachStrategies(overlapIssues, consolidationStrategies);
+    }
+
+    return this.buildResult(analyses, context);
+  }
+}
+```
+
+**Prompt for Consolidation Strategy:**
+
+```
+You are analyzing overlapping contact lists in a CRM to determine consolidation strategy.
+
+Company Context:
+- Industry: {config.company.industry}
+- Business Model: {config.company.business_model}
+
+Overlap Case:
+- List A: "Enterprise Prospects" (1,245 members)
+- List B: "High-Value Leads" (1,103 members)
+- Overlap: 987 members (79% of A, 89% of B)
+
+Determine:
+1. Are these lists intentionally separate (different purposes) or redundant?
+2. Should they be consolidated, kept separate, or restructured?
+3. What is the business justification for your recommendation?
+4. If consolidating, which list should be primary?
+
+Think through:
+- List naming suggests intent (are they targeting different outcomes?)
+- Overlap percentage (high overlap suggests redundancy)
+- Member counts (which list is more complete?)
+- Business context (does the industry affect list strategy?)
+```
 
 **Actions Generated:**
 - Archive unused lists
-- Remove invalid members
-- Consolidation recommendations
+- Remove invalid members (bounced, unsubscribed)
+- Consolidation recommendations (with AI strategy if applicable)
+- Fix broken filter criteria
+
+**Cost Control:**
+
+```typescript
+interface ListAuditConfig {
+  // Rule-based (always enabled, free)
+  unusedThresholdMonths: number;        // Default: 6
+  overlapThresholdPercent: number;      // Default: 80
+
+  // AI consolidation strategy
+  enableConsolidationStrategy: boolean; // Default: true
+  maxOverlapCasesForAI: number;         // Default: 10 (cost control)
+
+  // Overall
+  maxAiCostPerAudit: number;            // Default: $0.50 (low - mostly rule-based)
+}
+```
 
 **Tasks:**
 1. Implement ListAudit module
 2. Fetch list metadata and membership
-3. Calculate overlap percentages
-4. Identify stale lists
-5. Generate cleanup actions
+3. Add rule-based checks (unused, invalid members, broken config)
+4. Calculate overlap percentages
+5. **NEW:** Integrate Claude with REASONING mode for consolidation strategy (selective)
+6. Generate cleanup actions
+7. Write comprehensive tests
+
+**Acceptance Criteria:**
+- [ ] Detects unused lists based on activity threshold
+- [ ] Identifies invalid members (bounced, unsubscribed)
+- [ ] Detects broken filter criteria
+- [ ] Calculates overlap percentages accurately
+- [ ] **NEW:** AI provides consolidation strategy for high-overlap cases (when enabled and within budget)
+- [ ] **NEW:** AI reasoning explains whether lists are redundant or intentionally separate
+- [ ] Actions generated include removal and consolidation recommendations
+- [ ] Performance: All lists analyzed in <20s (rule-based), AI time minimal (max 10 cases)
 
 **Estimated Effort**: Medium
+
+**Rationale for Changes:**
+
+List hygiene is **mostly rule-based** because most issues are clear-cut:
+- Unused lists = no activity (objective)
+- Invalid members = bounced/unsubscribed (objective)
+- Broken config = references missing properties (objective)
+
+AI adds value only for **consolidation strategy** when overlap is detected, helping determine:
+- Are overlapping lists redundant or intentionally separate?
+- Which list should be primary if consolidating?
+- What business logic should guide future segmentation?
+
+This is a **light touch** of AI (~5-10 cases per audit), keeping costs minimal while adding strategic value.
 
 ---
 
 ### Epic 12: Marketing Contact Optimization Audit
 
-**Detects:**
-- Inactive marketing contacts (no engagement in X months)
-- Unsubscribed contacts still marked as marketing
-- Bounced emails marked as marketing
-- Non-ICP contacts consuming marketing slots
+**Objective**: Optimize marketing contact allocation using **business reasoning and risk analysis** to maximize ROI while avoiding false positives.
 
-**Actions Generated:**
-- Convert to non-marketing status
-- Delete recommendations for low-value contacts
-- Cost savings calculations
+**Key Enhancement**: Marketing contact decisions have **high business impact** - converting the wrong contact to non-marketing could lose a high-value opportunity. This audit showcases **EXPLORATORY mode** with data investigation and business judgment to assess:
+1. Contact value (deals, engagement, ICP fit)
+2. Conversion risk (am I about to demote a hot lead?)
+3. ROI calculation (cost savings vs potential revenue loss)
+
+**Two-Phase Analysis:**
+
+```
+Phase 1: Rule-Based (Obvious Candidates, HIGH confidence)
+├─ Hard bounced → Convert (99% confidence)
+├─ Unsubscribed → Convert (99% confidence)
+├─ Internal/employees → Convert (95% confidence)
+├─ Test contacts (email contains "test") → Convert (95% confidence)
+└─ Never engaged + created >24 months ago → Flag for Phase 2
+
+Phase 2: Agentic AI (Value & Risk Assessment - EXPLORATORY mode)
+├─ Investigate contact value (deals, engagement, company size)
+├─ Assess ICP alignment (industry, title, company profile)
+├─ Evaluate conversion risk (recent activity, deal stage)
+├─ Calculate ROI (cost savings vs potential revenue)
+└─ Business judgment: Convert, Keep, or Monitor
+```
+
+**Detects:**
+1. **Obvious Candidates** (RULE-BASED - HIGH confidence):
+   - Hard bounced emails
+   - Explicitly unsubscribed contacts
+   - Internal/employee emails
+   - Test/dummy contacts
+
+2. **Low-Engagement Contacts** (AGENTIC - EXPLORATORY):
+   - No engagement in 18+ months, BUT need to check:
+     - Are they in an active deal?
+     - Do they match ICP (high-value if they re-engage)?
+     - Is their company growing (might become valuable)?
+     - Any recent website visits or form submissions?
+
+3. **Non-ICP Contacts** (AGENTIC - EXPLORATORY):
+   - Outside target industry/company size, BUT need to assess:
+     - Do they have deal history (proven value)?
+     - Are they a referral source?
+     - Is the ICP definition too narrow (should we expand)?
+
+4. **Inactive High-Value Contacts** (AGENTIC - EXPLORATORY with HIGH caution):
+   - No recent engagement BUT associated with closed-won deals
+   - Need careful analysis to avoid demoting champions/decision-makers
+
+**Marketing Contact Analysis Structure:**
+
+```typescript
+interface MarketingContactAnalysis {
+  contact_id: string;
+  contact_name: string;
+  email: string;
+  current_status: 'marketing' | 'non-marketing';
+
+  metrics: {
+    days_since_last_engagement: number;
+    email_opens_12mo: number;
+    email_clicks_12mo: number;
+    form_submissions_12mo: number;
+    deal_count: number;
+    closed_won_value: number;
+  };
+
+  icp_fit: {
+    company_size_match: boolean;
+    industry_match: boolean;
+    title_match: boolean;
+    overall_score: number;                // 0-100
+  };
+
+  recommendation: {
+    action: 'convert' | 'keep' | 'monitor';
+    confidence: 'high' | 'medium' | 'low';
+    detection_method: 'rule' | 'ai_exploratory';
+
+    // For AI-analyzed contacts
+    ai_analysis?: {
+      value_assessment: string;          // "Low value", "Medium value", "High value - KEEP"
+      risk_analysis: string;             // Risk of converting
+      thinking_summary: string;          // Key reasoning
+      investigated_factors: string[];    // What Claude looked at
+      roi_calculation: {
+        monthly_cost_savings: number;
+        potential_revenue_risk: number;
+        net_benefit: number;
+      };
+      business_rationale: string;
+    };
+  };
+}
+```
+
+**Implementation Pattern:**
+
+```typescript
+class MarketingAudit implements AuditModule {
+  async run(context: AuditContext): Promise<AuditResult> {
+    const marketingContacts = await context.hubspot.getMarketingContacts();
+    const analyses: MarketingContactAnalysis[] = [];
+
+    // PHASE 1: Rule-based obvious candidates (fast, free, high-confidence)
+    const obviousCandidates = marketingContacts.filter(c =>
+      this.isHardBounced(c) ||
+      this.isUnsubscribed(c) ||
+      this.isInternal(c) ||
+      this.isTestContact(c)
+    );
+
+    analyses.push(...obviousCandidates.map(c => ({
+      ...c,
+      recommendation: {
+        action: 'convert',
+        confidence: 'high',
+        detection_method: 'rule'
+      }
+    })));
+
+    // PHASE 2: Ambiguous cases need AI investigation
+    const ambiguousCandidates = marketingContacts.filter(c =>
+      !obviousCandidates.includes(c) &&
+      (this.isLowEngagement(c) || !this.matchesICP(c, context.config))
+    );
+
+    if (ambiguousCandidates.length > 0) {
+      // Batch analyze with EXPLORATORY mode
+      const aiAnalyses = await context.claude.analyzeWithExploration(
+        this.buildValueAssessmentPrompt(ambiguousCandidates, context.config),
+        this.getMarketingInvestigationTools(),
+        {
+          mode: 'exploratory',
+          maxThinkingTokens: 4000,
+          tools: marketingInvestigationTools,
+          maxToolCalls: 15
+        }
+      );
+
+      analyses.push(...aiAnalyses);
+    }
+
+    // Calculate cost savings
+    const costSavings = this.calculateSavings(analyses, context.config);
+
+    return this.buildResult(analyses, costSavings, context);
+  }
+}
+```
+
+**Tools for Marketing Investigation:**
+
+```typescript
+const marketingInvestigationTools = [
+  {
+    name: "get_deal_history",
+    description: "Get deal associations and values to assess contact value",
+    input_schema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "get_engagement_details",
+    description: "Get detailed engagement history (emails, forms, website visits)",
+    input_schema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        monthsBack: { type: "number" }
+      }
+    }
+  },
+  {
+    name: "get_company_profile",
+    description: "Get company details to assess growth potential and ICP fit",
+    input_schema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "check_recent_activity",
+    description: "Check for any recent activity that might indicate renewed interest",
+    input_schema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" },
+        daysBack: { type: "number" }
+      }
+    }
+  },
+  {
+    name: "assess_referral_value",
+    description: "Check if contact has referred others or is connected to valuable accounts",
+    input_schema: {
+      type: "object",
+      properties: {
+        contactId: { type: "string" }
+      }
+    }
+  }
+];
+```
+
+**Prompt for Value Assessment:**
+
+```
+You are analyzing marketing contacts to determine if they should be converted to non-marketing status to save costs, while avoiding loss of high-value opportunities.
+
+Company Context:
+- Industry: {config.company.industry}
+- Business Model: {config.company.business_model}
+- ICP: {config.icp}
+- Average Deal Value: $50,000
+- Sales Cycle: 60-90 days
+
+Contact: {contact.name} at {contact.company}
+- Last engagement: 18 months ago
+- Email opens (12mo): 0
+- Deal history: 1 closed-won deal ($75,000) 2 years ago
+- Current title: VP of Engineering
+- Company: Series B SaaS startup (100 employees)
+
+Investigate:
+1. Contact value: Use tools to check deal associations, engagement, company profile
+2. Conversion risk: What's the downside of demoting this contact?
+3. ROI analysis: Cost savings ($40/mo) vs potential revenue risk
+
+Think through:
+- They have a closed-won deal (proven value) but no recent activity
+- VP of Engineering at growing SaaS company (matches ICP)
+- Could this be a seasonal engagement pattern?
+- If they re-engage, would we lose them by demoting?
+- Is $40/month worth the risk of losing a potential $50k opportunity?
+
+Recommendation: Convert, Keep, or Monitor?
+```
+
+**Business Decision Matrix (for AI):**
+
+```
+HIGH CONFIDENCE CONVERT (90%+):
+- Hard bounced OR unsubscribed (can't contact anyway)
+- Internal/test contacts (not real prospects)
+- No engagement 24+ months + no deal history + poor ICP fit
+- Cost savings > $100/mo + near-zero revenue risk
+
+MEDIUM CONFIDENCE CONVERT (70-89%):
+- No engagement 18+ months + no deals + weak ICP fit
+- Low engagement + poor company profile
+- Cost savings justify moderate revenue risk
+
+KEEP (HIGH caution):
+- Any closed-won deal history (proven value)
+- Strong ICP fit + recent website activity
+- Associated with active deals
+- Referral sources or connectors
+
+MONITOR (defer decision):
+- Marginal ICP fit + some engagement
+- Growing companies (potential future value)
+- Ambiguous value signals
+```
+
+**Cost Savings Calculation:**
+
+```typescript
+interface CostSavings {
+  current: {
+    marketing_contacts: number;
+    monthly_cost: number;
+    utilization_percent: number;
+  };
+
+  recommendations: {
+    high_confidence_conversions: number;
+    medium_confidence_conversions: number;
+    low_confidence_conversions: number;
+  };
+
+  savings: {
+    immediate_monthly: number;           // High confidence only
+    potential_monthly: number;           // High + medium confidence
+    annual_projection: number;
+    roi_vs_risk_ratio: number;           // Net benefit / cost savings
+  };
+
+  risk_assessment: {
+    contacts_with_deal_history: number;
+    potential_revenue_at_risk: number;
+    recommendation: string;              // "Proceed", "Review high-value contacts first", etc.
+  };
+}
+```
 
 **Output:**
 ```
 Marketing Contact Optimization Report
 
-Current: 8,734 / 10,000 marketing contacts (87%)
-Monthly cost: ~$1,200
+Current Status:
+├─ Marketing Contacts: 8,734 / 10,000 (87% utilization)
+├─ Monthly Cost: ~$1,200
+└─ Average Deal Value: $50,000
 
-Conversion Candidates:
-├─ High Confidence (892 contacts) - $357/month savings
-│  ├─ Unsubscribed: 567 contacts
-│  ├─ Hard bounced: 234 contacts
-│  └─ Internal/employees: 91 contacts
-│
-└─ Medium Confidence (564 contacts) - $226/month savings
-   ├─ No engagement 18+ months: 345 contacts
-   └─ Outside ICP: 219 contacts
+Conversion Candidates (AI-Analyzed):
+┌─────────────────────────────────────────────────────────────────┐
+│ HIGH CONFIDENCE (892 contacts) - $357/month savings             │
+│ ├─ Unsubscribed: 567 contacts (can't email anyway)             │
+│ ├─ Hard bounced: 234 contacts (invalid addresses)              │
+│ └─ Internal/test: 91 contacts (not real prospects)             │
+│ Risk: NONE - These contacts have no marketing value            │
+└─────────────────────────────────────────────────────────────────┘
 
-Total Potential Savings: $583/month ($6,996/year)
+┌─────────────────────────────────────────────────────────────────┐
+│ MEDIUM CONFIDENCE (412 contacts) - $165/month savings           │
+│ ├─ No engagement 24+ months + poor ICP fit: 278 contacts       │
+│ ├─ No engagement 18+ months + no deals: 134 contacts           │
+│ AI Analysis: Low future value, minimal revenue risk            │
+│ Risk: LOW - $12k potential revenue (if 5% re-engage)           │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ KEEP (152 contacts flagged but AI says KEEP)                   │
+│ ├─ Low engagement BUT closed-won deal history: 87 contacts     │
+│ ├─ No recent activity BUT strong ICP fit: 42 contacts          │
+│ ├─ Inactive BUT associated with active deals: 23 contacts      │
+│ AI Reasoning: Revenue risk outweighs cost savings              │
+│ Estimated Value at Risk: $450k (if 15% convert)                │
+└─────────────────────────────────────────────────────────────────┘
+
+Recommendation:
+✓ PROCEED with 892 high-confidence conversions → $357/mo savings
+⚠ REVIEW 412 medium-confidence (AI flagged low risk, but manual check advised)
+✗ DO NOT convert 152 flagged contacts (AI assessed high revenue risk)
+
+Net Annual Savings (conservative): $4,284 (high-confidence only)
+Potential Annual Savings (if medium included): $6,264
+```
+
+**Actions Generated:**
+- Convert to non-marketing status (with confidence level)
+- Delete recommendations for zero-value contacts
+- KEEP recommendations for high-value contacts (even if inactive)
+- Cost savings report with risk assessment
+
+**Cost Control:**
+
+```typescript
+interface MarketingAuditConfig {
+  // Rule-based (always enabled)
+  inactivityThresholdMonths: number;    // Default: 18
+
+  // AI value assessment
+  enableValueAssessment: boolean;       // Default: true
+  maxContactsForAI: number;             // Default: 500 (cost control)
+  investigateContactsWithDeals: boolean; // Default: true (catch high-value)
+
+  // Business context
+  averageDealValue: number;             // For ROI calculation
+  costPerMarketingContact: number;      // Default: $0.40/month
+
+  // Overall
+  maxAiCostPerAudit: number;            // Default: $10.00 (higher - high-value audit)
+}
 ```
 
 **Tasks:**
 1. Implement MarketingAudit module
-2. Calculate engagement metrics
-3. Identify conversion candidates
-4. Calculate cost savings
-5. Generate conversion actions
+2. Calculate engagement metrics (emails, forms, website visits)
+3. Add rule-based obvious candidate detection
+4. **NEW:** Implement ambiguous case identification
+5. **NEW:** Integrate Claude with EXPLORATORY mode for value assessment
+6. **NEW:** Implement marketing investigation tools (deals, engagement, company, referrals)
+7. **NEW:** Add business reasoning for keep vs convert decisions
+8. **NEW:** Implement ROI calculator (cost savings vs revenue risk)
+9. **NEW:** Add risk assessment for high-value contacts
+10. Calculate cost savings with confidence levels
+11. Generate conversion actions with AI reasoning
+12. Write comprehensive tests including false positive prevention
 
-**Estimated Effort**: Medium
+**Acceptance Criteria:**
+- [ ] Rule-based detection catches obvious candidates (bounced, unsubscribed, internal)
+- [ ] **NEW:** AI investigates ambiguous cases with value assessment
+- [ ] **NEW:** Investigation tools allow Claude to check deals, engagement, company profile
+- [ ] **NEW:** High-value contacts (deal history) are NOT recommended for conversion
+- [ ] **NEW:** ROI calculation compares cost savings to potential revenue risk
+- [ ] **NEW:** AI reasoning explains keep vs convert decisions
+- [ ] **NEW:** Risk assessment identifies contacts with high revenue potential
+- [ ] Cost savings calculated accurately with confidence levels
+- [ ] Performance: 10,000 contacts analyzed in <60s (rule-based), AI time varies by ambiguous count
+- [ ] **CRITICAL:** False positive rate <5% (don't demote high-value contacts)
+
+**Estimated Effort**: Large (increased from Medium to account for business reasoning and risk analysis)
+
+**Rationale for Changes:**
+
+Marketing contact optimization has **high business impact**:
+1. **Cost savings are real** - $357/month immediate savings adds up
+2. **But mistakes are costly** - Demoting a $50k opportunity costs 125 months of savings
+3. **Judgment required** - Low engagement ≠ low value (champions might lurk)
+4. **Investigation needed** - Must check deals, ICP fit, company growth
+5. **ROI analysis** - Need to weigh savings against revenue risk
+
+EXPLORATORY mode is perfect here because:
+- Claude can investigate each contact's value (deals, engagement, company)
+- Extended thinking allows nuanced risk assessment
+- Business judgment: "Is $40/month worth risking a $50k deal?"
+- Tools provide context that simple metrics can't capture
+
+This audit **justifies its AI cost** by preventing expensive false positives.
 
 ---
 
 ### Epic 13: Feature Utilization Audit
 
+**Objective**: Analyze HubSpot feature usage and provide **strategic prioritization** using iterative AI analysis.
+
+**Key Enhancement**: Feature utilization requires **strategic thinking** - which unused features would add most value given the company's business model, team size, and current challenges? This audit showcases **ITERATIVE mode** where Claude:
+1. Analyzes feature usage data
+2. Considers business context and priorities
+3. Refines recommendations based on dependencies and ROI
+4. Prioritizes features in a strategic implementation order
+
+**Multi-Turn Analysis Approach:**
+
+```
+Turn 1: Feature Assessment (EXPLORATORY mode)
+├─ Analyze subscription tier and included features
+├─ Identify unused, underutilized, and well-utilized features
+├─ Use tools to investigate configuration status
+└─ Output: Feature usage breakdown with gaps identified
+
+Turn 2: Strategic Prioritization (ITERATIVE mode, refines Turn 1)
+├─ Consider business context (industry, model, ICP, team size)
+├─ Assess implementation difficulty vs business value
+├─ Identify feature dependencies (X requires Y first)
+├─ Calculate ROI for each recommendation
+└─ Output: Prioritized roadmap with reasoning
+```
+
+**Why Iterative (Multi-Turn):**
+- **Turn 1** gathers data and identifies gaps
+- **Turn 2** refines by applying business strategy and prioritization logic
+- This is inherently iterative - can't prioritize until you understand what's missing
+
 **Detects:**
-- Unused HubSpot features you're paying for
-- Underutilized features
-- Missing configurations that would add value
+1. **Unused Features** (RULE-BASED detection, AGENTIC prioritization):
+   - Features included in subscription but never configured
+   - Features with zero usage in past 6 months
+   - Tools that could solve current pain points
+
+2. **Underutilized Features** (AGENTIC - REASONING):
+   - Configured but rarely used
+   - Used incorrectly or sub-optimally
+   - Missing integrations that would increase value
+
+3. **Missing Configurations** (AGENTIC - EXPLORATORY):
+   - Features that require setup to deliver value
+   - Integration opportunities with existing tools
+   - Workflow automation gaps
+
+4. **Strategic Opportunities** (AGENTIC - ITERATIVE):
+   - Features that align with business model
+   - High-ROI quick wins
+   - Competitive advantages being left on the table
+
+**Feature Analysis Structure:**
+
+```typescript
+interface FeatureAnalysis {
+  subscription_tier: string;
+  monthly_cost: number;
+  features: FeatureUsage[];
+
+  summary: {
+    total_features: number;
+    in_use: number;
+    configured_but_underused: number;
+    never_configured: number;
+    utilization_percent: number;
+  };
+
+  strategic_recommendations: StrategicRecommendation[];
+}
+
+interface FeatureUsage {
+  feature_name: string;
+  category: 'marketing' | 'sales' | 'service' | 'operations';
+  status: 'in-use' | 'configured-underused' | 'unconfigured';
+  usage_metrics: {
+    last_used?: Date;
+    usage_frequency: 'daily' | 'weekly' | 'monthly' | 'never';
+    config_completeness: number;      // 0-100%
+  };
+}
+
+interface StrategicRecommendation {
+  feature_name: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  detection_method: 'rule' | 'ai_exploratory' | 'ai_iterative';
+
+  // AI strategic analysis
+  ai_analysis: {
+    business_value_assessment: string;
+    implementation_effort: 'low' | 'medium' | 'high';
+    estimated_time_to_value: string;  // "1 week", "1 month", etc.
+    roi_justification: string;
+    thinking_summary: string;
+
+    // Strategic positioning
+    fits_business_model: boolean;
+    addresses_current_gaps: string[];
+    dependencies: string[];            // "Requires X to be set up first"
+    success_metrics: string[];
+
+    // Prioritization reasoning (from iterative analysis)
+    priority_rationale: string;
+    quick_win: boolean;
+    strategic_importance: number;      // 1-10
+    implementation_order: number;      // Suggested sequence
+  };
+}
+```
+
+**Implementation Pattern:**
+
+```typescript
+class FeatureAudit implements AuditModule {
+  async run(context: AuditContext): Promise<AuditResult> {
+    // PHASE 1: Gather feature usage data (rule-based)
+    const accountInfo = await context.hubspot.getAccountInfo();
+    const subscription = await context.hubspot.getSubscriptionInfo();
+    const features = await this.detectFeatureUsage(context.hubspot);
+
+    // PHASE 2: TURN 1 - Analyze gaps with EXPLORATORY mode
+    const gapAnalysis = await context.claude.analyzeWithExploration(
+      this.buildGapAnalysisPrompt(features, accountInfo, context.config),
+      this.getFeatureInvestigationTools(),
+      {
+        mode: 'exploratory',
+        maxThinkingTokens: 3000,
+        tools: featureInvestigationTools,
+        maxToolCalls: 10
+      }
+    );
+
+    // PHASE 3: TURN 2 - Strategic prioritization with ITERATIVE mode
+    const strategicPlan = await context.claude.analyzeWithReasoning(
+      this.buildPrioritizationPrompt(gapAnalysis, context.config, accountInfo),
+      [],
+      {
+        mode: 'iterative',
+        maxThinkingTokens: 4000,
+        maxTurns: 2  // Refine prioritization
+      }
+    );
+
+    return this.buildResult(features, strategicPlan, context);
+  }
+}
+```
+
+**Tools for Feature Investigation:**
+
+```typescript
+const featureInvestigationTools = [
+  {
+    name: "check_feature_configuration",
+    description: "Check if a feature is configured and how completely",
+    input_schema: {
+      type: "object",
+      properties: {
+        featureName: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "get_workflow_usage",
+    description: "Get workflow automation usage statistics",
+    input_schema: {
+      type: "object",
+      properties: {}
+    }
+  },
+  {
+    name: "check_integration_status",
+    description: "Check which integrations are active",
+    input_schema: {
+      type: "object",
+      properties: {}
+    }
+  },
+  {
+    name: "get_reporting_usage",
+    description: "Check custom report and dashboard usage",
+    input_schema: {
+      type: "object",
+      properties: {}
+    }
+  },
+  {
+    name: "assess_team_size",
+    description: "Get team size and seat usage to recommend appropriate features",
+    input_schema: {
+      type: "object",
+      properties: {}
+    }
+  }
+];
+```
+
+**Prompts for Multi-Turn Analysis:**
+
+**Turn 1 (Gap Analysis):**
+```
+You are analyzing a HubSpot account to identify unused or underutilized features.
+
+Subscription: Marketing Hub Professional ($800/month)
+Company Context:
+- Industry: {config.company.industry}
+- Business Model: {config.company.business_model}
+- ICP: {config.icp}
+- Team Size: {teamSize}
+
+Feature Usage Data:
+- Lead Scoring: Not configured
+- A/B Testing: Configured but never used (0 tests in 12 months)
+- Workflows: 5 active (simple automation only)
+- Custom Reports: 0 created
+- Sequences: Not configured
+- Social Publishing: Rarely used (2 posts/month)
+
+Investigate:
+1. Which features represent the biggest missed opportunities?
+2. Which features are configured but not delivering value?
+3. What gaps exist in their current HubSpot usage?
+
+Use tools to check configuration completeness and integration status.
+```
+
+**Turn 2 (Strategic Prioritization):**
+```
+Based on the gap analysis, create a strategic prioritization plan.
+
+Context from Turn 1:
+{gapAnalysis}
+
+Additional Business Context:
+- Sales Cycle: 60-90 days
+- Average Deal Value: $50,000
+- Current Challenges: {challenges from config}
+- Team: 3 marketers, 5 sales reps
+
+Strategic Questions:
+1. Which features would deliver immediate value (quick wins)?
+2. Which features align with their business model and ICP?
+3. What's the logical implementation order (considering dependencies)?
+4. What's the ROI justification for each recommendation?
+
+Think through:
+- Lead Scoring could qualify leads better (matches ICP targeting)
+- Sequences could automate follow-up (fits 60-90 day cycle)
+- But Sequences require contact segmentation first
+- A/B testing configured but unused suggests training gap
+- Custom reports could surface pipeline bottlenecks
+
+Prioritize features with:
+- Clear ROI tied to revenue/efficiency
+- Reasonable implementation effort
+- Alignment with business model
+- Consideration of dependencies
+```
+
+**Strategic Prioritization Matrix (for AI):**
+
+```
+CRITICAL PRIORITY (implement first):
+- High business value + Low effort = Quick wins
+- Addresses major gaps in current process
+- Foundation for other features (e.g., segmentation enables sequences)
+- Clear ROI within 1 month
+
+HIGH PRIORITY (implement next):
+- High business value + Medium effort
+- Aligns strongly with business model
+- ROI within 3 months
+- Competitive advantage
+
+MEDIUM PRIORITY (plan for later):
+- Medium business value + Low-Medium effort
+- Nice-to-have improvements
+- ROI within 6 months
+- Depends on adoption of higher-priority features
+
+LOW PRIORITY (defer):
+- Low business value or High effort
+- Doesn't align with current business model
+- Unclear ROI or long payback period
+- Features they're unlikely to use given team size/maturity
+```
 
 **Output:**
 ```
 Feature Utilization Report
 
-Subscription: Marketing Hub Professional ($800/month)
-Features in use: 23/47 (49%)
+Subscription: Marketing Hub Professional ($800/month, 47 features)
+Current Utilization: 23/47 features (49%)
+Estimated Value Left on Table: $4,800/year
 
-Unused High-Value Features:
-├─ Lead Scoring - Not configured
-│  └─ Recommendation: Set up based on your ICP criteria
-├─ A/B Testing - Never used
-│  └─ Recommendation: Start with subject line tests
-└─ Custom Reports - 0 created
-   └─ Recommendation: Create funnel conversion report
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRATEGIC ROADMAP (AI-Prioritized)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Based on your B2B SaaS model, prioritize:
-1. Lead Scoring (matches your ICP targeting)
-2. Sequences (fits your 60-90 day sales cycle)
+MONTH 1: QUICK WINS (Critical Priority)
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Lead Scoring                                                 │
+│    Implementation: 1 week                                       │
+│    ROI: Qualify 30% more leads accurately → $45k/year value    │
+│    Why: Matches your ICP targeting, filters out poor fits      │
+│    Dependencies: None                                           │
+│    AI Reasoning: You have clear ICP criteria in config.        │
+│                  This is the foundation for automation.         │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. Custom Reports (Pipeline Health Dashboard)                  │
+│    Implementation: 3 days                                       │
+│    ROI: Surface bottlenecks → 15% faster sales cycle           │
+│    Why: You're flying blind without pipeline visibility        │
+│    Dependencies: None                                           │
+│    AI Reasoning: Quick win with immediate visibility gains     │
+└─────────────────────────────────────────────────────────────────┘
+
+MONTH 2-3: AUTOMATION (High Priority)
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. Sequences (Email Automation)                                │
+│    Implementation: 2 weeks                                      │
+│    ROI: Save 10 hours/week + improve follow-up consistency     │
+│    Why: Your 60-90 day sales cycle needs systematic nurture    │
+│    Dependencies: Lead Scoring (segment contacts first)         │
+│    AI Reasoning: Fits B2B model perfectly. Requires scoring    │
+│                  to avoid spamming wrong contacts.             │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. Advanced Workflows (Lifecycle Automation)                   │
+│    Implementation: 2 weeks                                      │
+│    ROI: Reduce manual data entry, improve lead routing         │
+│    Why: You have basic workflows, unlock advanced features     │
+│    Dependencies: Lead Scoring                                   │
+└─────────────────────────────────────────────────────────────────┘
+
+MONTH 4+: OPTIMIZATION (Medium Priority)
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. A/B Testing (Fix Underutilization)                          │
+│    Implementation: Training + templates                         │
+│    ROI: 10-20% improvement in email performance                │
+│    Why: You paid for it but never used it (training gap)       │
+│    Note: AI flagged this as training issue, not tech gap       │
+└─────────────────────────────────────────────────────────────────┘
+
+DEFERRED (Low Priority)
+• Social Publishing - Low ROI for B2B with 60-90 day sales cycle
+• Advanced SEO Tools - Not your primary channel
+• Attribution Reporting - Requires more marketing maturity
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ESTIMATED ANNUAL VALUE: $75,000+
+Implementation Time: 3-4 months (phased approach)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**Actions Generated:**
+- Feature configuration guides (step-by-step)
+- Training recommendations (for underutilized features)
+- Integration suggestions
+- **Phased implementation roadmap** (strategic order)
+
+**Cost Control:**
+
+```typescript
+interface FeatureAuditConfig {
+  // Always run (low cost)
+  detectUnusedFeatures: boolean;      // Default: true
+
+  // AI strategic analysis
+  enableStrategicPrioritization: boolean;  // Default: true
+  includeROICalculations: boolean;    // Default: true
+  maxIterativeTurns: number;          // Default: 2
+
+  // Overall
+  maxAiCostPerAudit: number;          // Default: $5.00 (high-value strategic work)
+}
 ```
 
 **Tasks:**
 1. Implement FeatureAudit module
-2. Query HubSpot account for feature usage
-3. Use Claude to generate context-aware recommendations
-4. Prioritize based on company config
+2. Query HubSpot account info and subscription tier
+3. Detect feature usage (configured, used, unused)
+4. **NEW:** Implement gap analysis with EXPLORATORY mode
+5. **NEW:** Implement strategic prioritization with ITERATIVE mode (2 turns)
+6. **NEW:** Add feature investigation tools
+7. **NEW:** Implement ROI calculation for each recommendation
+8. **NEW:** Create dependency mapping (X requires Y first)
+9. **NEW:** Generate phased implementation roadmap
+10. Use Claude to generate context-aware recommendations
+11. Prioritize based on company config and business model
+12. Write comprehensive tests
 
-**Estimated Effort**: Medium
+**Acceptance Criteria:**
+- [ ] Detects all unused features included in subscription
+- [ ] Identifies underutilized features (configured but rarely used)
+- [ ] **NEW:** Gap analysis uses EXPLORATORY mode to investigate configuration status
+- [ ] **NEW:** Strategic prioritization uses ITERATIVE mode to refine recommendations
+- [ ] **NEW:** ROI justification provided for each recommendation
+- [ ] **NEW:** Dependencies mapped (e.g., "Sequences require Lead Scoring first")
+- [ ] **NEW:** Implementation order reflects strategic thinking
+- [ ] **NEW:** Quick wins identified and prioritized
+- [ ] **NEW:** Business model alignment drives prioritization
+- [ ] **NEW:** Phased roadmap provides actionable implementation plan
+- [ ] Recommendations are specific and actionable
+- [ ] Prioritization reflects business context (industry, model, ICP)
+- [ ] Performance: Analysis completes in <120s (includes 2-turn AI conversation)
+
+**Estimated Effort**: Large (increased from Medium to account for iterative strategic analysis)
+
+**Rationale for Changes:**
+
+Feature utilization is the **perfect use case for ITERATIVE mode** because:
+1. **Strategic thinking required** - Which features matter most for THIS business?
+2. **Multi-factor prioritization** - Must balance value, effort, dependencies, ROI
+3. **Context-dependent** - B2B SaaS vs e-commerce need different features
+4. **Refinement needed** - Initial analysis → strategic prioritization → implementation order
+5. **High-value output** - $75k annual value from unused $800/month subscription
+
+Multi-turn conversation allows:
+- **Turn 1**: Gather data, identify gaps, investigate configurations
+- **Turn 2**: Apply business strategy, prioritize, sequence implementation
+
+This delivers a **strategic roadmap**, not just a feature list. The iterative approach produces recommendations users will actually follow because they're:
+- Prioritized by ROI
+- Sequenced logically (dependencies respected)
+- Aligned with business model
+- Justified with clear reasoning
 
 ---
 
 ### Epic 14: Audit Orchestrator
 
-**Objective**: Run multiple audits and aggregate results.
+**Objective**: Run multiple audits and aggregate results with **cross-cutting pattern recognition** and **dependency-aware prioritization**.
+
+**Key Enhancement**: When running multiple audits, Claude can identify **patterns and relationships** across different issue types. Extended thinking + cross-audit analysis enables strategic insights like:
+- "70% of duplicates have data quality issues → fix data entry first"
+- "Contacts with invalid emails are also non-ICP → safe to batch delete"
+- "Feature gaps correlate with manual workarounds → automation opportunities"
 
 **Commands:**
 ```bash
@@ -1437,35 +3236,272 @@ hubspot-audit audit all
 # Run specific combination
 hubspot-audit audit contacts --check=data-quality,duplicates
 
-# Comprehensive audit with cross-cutting analysis
+# Comprehensive audit with cross-cutting analysis (AI-powered)
 hubspot-audit audit all --comprehensive
 ```
 
-**Cross-Cutting Analysis:**
+**Cross-Cutting Analysis (REASONING mode):**
+
 After running multiple audits, Claude analyzes patterns across findings:
-- Common root causes
-- Prioritized fix order
-- Systemic issues vs one-off problems
+
+```typescript
+interface CrossCuttingAnalysis {
+  patterns: Pattern[];
+  systemic_issues: SystemicIssue[];
+  prioritized_execution_order: ExecutionRecommendation[];
+
+  ai_insights: {
+    root_cause_analysis: string;
+    strategic_recommendations: string[];
+    thinking_summary: string;
+    efficiency_opportunities: string[];    // Batch operations identified
+  };
+}
+
+interface Pattern {
+  description: string;
+  affected_audits: string[];
+  contacts_affected: number;
+  confidence: number;
+
+  ai_analysis: {
+    why_this_matters: string;
+    recommended_action: string;
+    potential_batch_operation: boolean;
+  };
+}
+
+interface SystemicIssue {
+  issue_type: string;
+  frequency: number;
+  likely_root_cause: string;
+  prevention_strategy: string;
+}
+
+interface ExecutionRecommendation {
+  action_plan_ids: string[];
+  execution_order: number;
+  rationale: string;
+  dependencies: string[];
+  estimated_time_savings: string;         // From batching
+}
+```
+
+**Implementation Pattern:**
+
+```typescript
+class AuditOrchestrator {
+  async runAllAudits(options: OrchestratorOptions): Promise<AggregatedResult> {
+    // PHASE 1: Run audits in parallel (independent)
+    const auditPromises = [
+      this.runAudit('data-quality', context),
+      this.runAudit('duplicates', context),
+      this.runAudit('properties', context),
+      this.runAudit('lists', context),
+      this.runAudit('marketing', context),
+      this.runAudit('features', context),
+    ];
+
+    const results = await Promise.all(auditPromises);
+
+    // PHASE 2: Aggregate results
+    const aggregated = this.aggregateResults(results);
+
+    // PHASE 3: Cross-cutting analysis (if --comprehensive)
+    if (options.comprehensive) {
+      const crossCuttingAnalysis = await context.claude.analyzeWithReasoning(
+        this.buildCrossCuttingPrompt(results, context.config),
+        [],
+        { mode: 'reasoning', maxThinkingTokens: 5000 }
+      );
+
+      aggregated.cross_cutting_analysis = crossCuttingAnalysis;
+    }
+
+    return aggregated;
+  }
+}
+```
+
+**Prompt for Cross-Cutting Analysis:**
+
+```
+You have results from 6 different audits of a HubSpot portal. Analyze patterns across audits.
+
+Audit Results Summary:
+1. Data Quality: 247 issues (missing fields, invalid formats, typos)
+2. Duplicates: 89 pairs identified
+3. Properties: 15 value variations, 8 low-population properties
+4. Lists: 12 unused lists, 5 overlap cases
+5. Marketing: 892 conversion candidates
+6. Features: 24 unused features
+
+Analyze:
+1. Are there patterns across audits? (e.g., do duplicates also have data quality issues?)
+2. What are the root causes? (process gaps, training issues, integration problems?)
+3. What's the optimal execution order? (are there dependencies?)
+4. Are there efficiency opportunities? (batch operations, one-time fixes vs ongoing issues?)
+
+Think through:
+- If duplicates also have missing data, maybe a data entry process is broken
+- If unused features could automate manual workarounds, that's a strategic priority
+- If marketing contacts have invalid emails, batch them with other deletions
+- Execution order matters: fixing data quality first prevents creating duplicate fixes
+```
+
+**Cross-Cutting Pattern Examples:**
+
+```
+PATTERN: "Data Quality → Duplicate Creation"
+├─ 73% of duplicate contacts have missing/invalid email fields
+├─ Root Cause: Manual data entry without validation
+├─ Recommendation: Fix data quality validation BEFORE merging duplicates
+└─ Prevention: Implement form validation + workflow automation
+
+PATTERN: "Feature Gaps → Manual Workarounds"
+├─ Marketing team manually segments contacts (lead scoring unused)
+├─ Sales team manually tracks follow-ups (sequences unused)
+├─ Root Cause: Features not configured, team unaware
+├─ Recommendation: Feature utilization recommendations are HIGH priority
+└─ Estimated Time Savings: 15 hours/week
+
+PATTERN: "Marketing Contact Waste → List Overlap"
+├─ 65% of conversion candidates appear in unused lists
+├─ Opportunity: Clean up lists AND marketing contacts in one pass
+├─ Recommendation: Batch operation combining list cleanup + marketing conversion
+└─ Efficiency Gain: 40% faster than separate executions
+```
+
+**Dependency-Aware Prioritization:**
+
+```typescript
+interface ExecutionPrioritization {
+  batches: ExecutionBatch[];
+
+  ai_reasoning: {
+    dependency_analysis: string;
+    efficiency_gains: string;
+    risk_mitigation: string;
+  };
+}
+
+interface ExecutionBatch {
+  batch_number: number;
+  action_plans: string[];
+  rationale: string;
+  must_complete_before_next: boolean;
+  estimated_duration: string;
+}
+```
+
+**Example Output:**
+
+```
+Cross-Cutting Analysis
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERNS DETECTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Pattern 1: Data Quality Issues Feed Duplicate Creation
+├─ 73% of duplicates have invalid or missing email fields
+├─ Root Cause: Manual data entry without validation
+└─ AI Recommendation: Fix data entry process BEFORE merging duplicates
+
+Pattern 2: Unused Features = Manual Workarounds
+├─ Team spending 15 hours/week on tasks that HubSpot could automate
+├─ Lead scoring, sequences, and workflows could eliminate this work
+└─ AI Recommendation: Feature utilization is HIGH strategic priority
+
+Pattern 3: Marketing Contact + List Cleanup Overlap
+├─ 65% of marketing conversion candidates are in unused lists
+└─ AI Recommendation: Batch these operations for 40% efficiency gain
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RECOMMENDED EXECUTION ORDER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Batch 1: FOUNDATION (Week 1)
+├─ Data Quality fixes (prevent creating bad duplicates)
+├─ Property standardization (clean data for accurate matching)
+└─ Rationale: Clean data foundation prevents rework
+
+Batch 2: DEDUPLICATION (Week 2)
+├─ Merge duplicates (now with clean data)
+└─ Rationale: Depends on Batch 1 completion
+
+Batch 3: OPTIMIZATION (Week 3)
+├─ Marketing contact conversion (batch with list cleanup)
+├─ List hygiene (remove unused, consolidate overlapping)
+└─ Rationale: Can be batched for 40% time savings
+
+Batch 4: STRATEGIC (Ongoing)
+├─ Feature utilization (implement lead scoring, sequences)
+└─ Rationale: Prevents future data quality issues via automation
+
+Estimated Total Time: 3-4 weeks
+Efficiency Gain from Batching: 12 hours saved
+Prevention Impact: 60% reduction in future duplicates (via automation)
+```
 
 **Tasks:**
 1. Implement AuditOrchestrator
 2. Add parallel execution for independent audits
 3. Implement result aggregation
-4. Add cross-cutting Claude analysis
-5. Generate combined action plan
+4. **NEW:** Add cross-cutting pattern detection with REASONING mode
+5. **NEW:** Implement dependency analysis for execution ordering
+6. **NEW:** Identify batching opportunities for efficiency
+7. **NEW:** Add root cause analysis
+8. Generate combined action plan with strategic ordering
+9. Write comprehensive tests
 
-**Estimated Effort**: Medium
+**Acceptance Criteria:**
+- [ ] Can run multiple audits in parallel
+- [ ] Results aggregated correctly
+- [ ] **NEW:** Cross-cutting patterns identified (e.g., data quality → duplicates)
+- [ ] **NEW:** Root cause analysis performed
+- [ ] **NEW:** Dependency-aware execution order recommended
+- [ ] **NEW:** Batching opportunities identified for efficiency
+- [ ] **NEW:** AI reasoning explains prioritization logic
+- [ ] **NEW:** Prevention strategies suggested (fix root causes)
+- [ ] Combined action plan generated
+- [ ] Performance: All audits complete in reasonable time (parallel execution)
+
+**Estimated Effort**: Medium-Large (increased from Medium to account for cross-cutting analysis)
+
+**Rationale for Changes:**
+
+The orchestrator is where **agentic capabilities shine brightest** because:
+1. **Pattern recognition** - Humans might miss connections between audit types
+2. **Strategic ordering** - Dependencies matter (fix data quality before deduplication)
+3. **Efficiency opportunities** - Batching operations saves time
+4. **Root cause analysis** - Why are these issues happening?
+5. **Prevention thinking** - How do we stop issues from recurring?
+
+Extended thinking allows Claude to:
+- Connect dots across different audit types
+- Reason about optimal execution order
+- Identify efficiency opportunities humans might miss
+- Suggest preventive measures (automate to prevent data quality issues)
+
+This transforms the tool from "find issues" to "strategic data improvement roadmap."
 
 ---
 
 ### Epic 15: Report Generation
 
-**Objective**: Export audit results in multiple formats.
+**Objective**: Export audit results in multiple formats with **AI reasoning visualization**.
+
+**Key Enhancement**: When reports include AI-generated insights, visualize the reasoning process to build trust and enable learning. Show:
+- Confidence scores prominently
+- Detection methods (rule vs AI)
+- Key reasoning excerpts
+- Cost breakdown by analysis type
 
 **Formats:**
-- **Terminal**: Colored, formatted output (default)
-- **JSON**: Machine-readable, for scripting
-- **HTML**: Shareable report with styling
+- **Terminal**: Colored, formatted output (default) with AI reasoning highlighted
+- **JSON**: Machine-readable, for scripting, includes full AI analysis
+- **HTML**: Shareable report with styling, collapsible AI reasoning sections
 
 **Commands:**
 ```bash
@@ -1476,14 +3512,146 @@ hubspot-audit audit contacts --check=data-quality --report=html
 hubspot-audit report ./audit-reports/data-quality-2025-01-15.json --format=html
 ```
 
+**HTML Report Enhancements:**
+
+```html
+<!-- AI Reasoning Display -->
+<div class="issue-card ai-detected">
+  <div class="issue-header">
+    <span class="confidence-badge medium">75% Confidence</span>
+    <span class="detection-method">AI Reasoning</span>
+  </div>
+
+  <div class="issue-details">
+    <p class="description">Potential duplicate: "Jon Smith" vs "John Smith"</p>
+
+    <!-- Collapsible AI Reasoning -->
+    <details class="ai-reasoning">
+      <summary>View AI Reasoning</summary>
+      <div class="thinking-summary">
+        <strong>Key Insight:</strong>
+        Names differ by one character, same company, similar job titles.
+        Likely nickname variation. Investigated engagement history -
+        both have email activity but to different campaigns.
+        Medium confidence due to active engagement on both records.
+      </div>
+
+      <div class="confidence-factors">
+        <strong>Confidence Factors:</strong>
+        <ul class="factors-increase">
+          <li>✓ Name similarity (Levenshtein distance: 1)</li>
+          <li>✓ Same company association</li>
+          <li>✓ Similar job titles</li>
+        </ul>
+        <ul class="factors-decrease">
+          <li>⚠ Both records show recent activity</li>
+          <li>⚠ Different email campaigns</li>
+        </ul>
+      </div>
+
+      <div class="alternatives-considered">
+        <strong>Alternatives Considered:</strong>
+        <ul>
+          <li>Option A: Merge immediately (rejected - activity risk)</li>
+          <li>Option B: Flag for manual review (selected)</li>
+          <li>Option C: Keep separate (considered but less likely)</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- Cost Breakdown -->
+<div class="cost-summary">
+  <h3>AI Analysis Cost</h3>
+  <table>
+    <tr>
+      <td>Rule-based checks:</td>
+      <td>198 issues</td>
+      <td>$0.00</td>
+    </tr>
+    <tr>
+      <td>AI Reasoning (ambiguous cases):</td>
+      <td>34 issues</td>
+      <td>$1.20</td>
+    </tr>
+    <tr>
+      <td>AI Exploratory (complex cases):</td>
+      <td>15 issues</td>
+      <td>$2.80</td>
+    </tr>
+    <tr class="total">
+      <td><strong>Total:</strong></td>
+      <td><strong>247 issues</strong></td>
+      <td><strong>$4.00</strong></td>
+    </tr>
+  </table>
+</div>
+```
+
+**Terminal Output Enhancements:**
+
+```
+Data Quality Issues: 247 found
+
+Rule-Based (HIGH confidence) - 198 issues
+├─ Missing email: 45 contacts
+├─ Invalid phone format: 67 contacts
+└─ Stale data (>12mo): 86 contacts
+
+AI-Detected (MEDIUM confidence) - 34 issues
+├─ Ambiguous typos: 23 contacts
+│   Example: "Jon Smith" vs "John Smith" (75% confidence)
+│   💡 AI Reasoning: Name similarity + same company suggests nickname
+│
+└─ Semantic anomalies: 11 contacts
+    Example: "CEO" at "Intern Corp" (65% confidence)
+    💡 AI Reasoning: Title doesn't match company profile
+
+AI-Investigated (VARIED confidence) - 15 issues
+└─ Context-dependent validation: 15 contacts
+    💡 AI explored: company profiles, industry context, related contacts
+
+Cost: $4.00 (80% rule-based free, 20% AI value-add)
+```
+
 **Tasks:**
 1. Create ReportBuilder class
-2. Implement terminal formatter (existing, enhance)
-3. Implement JSON formatter
-4. Implement HTML formatter with template
-5. Add report comparison (vs previous audit)
+2. Implement terminal formatter (existing, enhance with AI reasoning display)
+3. **NEW:** Add confidence badge and detection method display
+4. **NEW:** Add collapsible AI reasoning sections
+5. **NEW:** Visualize confidence factors (increase/decrease)
+6. **NEW:** Show alternatives considered by AI
+7. **NEW:** Add cost breakdown by detection method
+8. Implement JSON formatter (include full AI analysis)
+9. Implement HTML formatter with template and AI reasoning styling
+10. Add report comparison (vs previous audit)
+
+**Acceptance Criteria:**
+- [ ] Terminal output shows issues clearly with colors
+- [ ] **NEW:** AI-detected issues visually distinguished from rule-based
+- [ ] **NEW:** Confidence scores displayed prominently
+- [ ] **NEW:** AI reasoning accessible but not overwhelming (collapsible)
+- [ ] **NEW:** Cost breakdown shows value of AI analysis
+- [ ] JSON export includes all data for scripting
+- [ ] HTML reports are shareable and professional
+- [ ] **NEW:** HTML AI reasoning sections are collapsible
+- [ ] **NEW:** Confidence factors visualized (pros/cons)
+- [ ] Report comparison shows changes over time
+- [ ] Performance: Report generation <5 seconds
 
 **Estimated Effort**: Medium
+
+**Rationale for Changes:**
+
+Report generation must **build trust in AI** by:
+1. **Transparency** - Show how AI reached conclusions
+2. **Learning opportunity** - Users learn what makes high vs low confidence
+3. **Cost justification** - Show value (80% free rule-based, 20% AI value-add)
+4. **Actionability** - Clear distinction between HIGH confidence (act now) vs MEDIUM (review first)
+5. **Progressive disclosure** - Reasoning available but not overwhelming (collapsible)
+
+Good reporting transforms AI from "black box" to "trusted advisor."
 
 ---
 
