@@ -1,12 +1,20 @@
 /**
  * Execute and rollback command implementations
+ * Epic 8: Execution Engine with Rollback
  *
  * Execute action plans and rollback changes if needed
  */
 
 import chalk from 'chalk';
-import { displayInfo, displayWarning, formatHeader, formatSection } from '../output/index.js';
+import inquirer from 'inquirer';
+import { ConfigManager } from '../../config/ConfigManager.js';
+import { HubSpotService } from '../../services/HubSpotService.js';
+import { ActionPlan, Executor, RollbackManager } from '../../actions/index.js';
+import type { ExecutionProgress } from '../../actions/index.js';
+import { displayError, displayInfo, displaySuccess, displayWarning, formatHeader, formatSection, formatKeyValue } from '../output/index.js';
+import { startProgress, succeedProgress, failProgress, warnProgress } from '../output/progress.js';
 import { createLogger } from '../../utils/logger.js';
+import type { Ora } from 'ora';
 
 const logger = createLogger('execute');
 
@@ -24,33 +32,205 @@ export interface ExecuteOptions {
 export async function executePlan(file: string, options: ExecuteOptions): Promise<void> {
   logger.info({ file, options }, 'Executing plan');
 
-  if (options.dryRun) {
-    console.log(chalk.bold(`\n🔍 Dry run: ${file}\n`));
-    console.log(chalk.dim('No changes will be made\n'));
-  } else {
-    console.log(chalk.bold.red(`\n⚠️  EXECUTING PLAN: ${file}\n`));
-    displayWarning(
-      'This will modify data in HubSpot!',
-      ['Make sure you have reviewed the plan before proceeding.']
-    );
-  }
+  try {
+    // Load config
+    const configManager = new ConfigManager();
+    const config = await configManager.load(options.config);
 
-  if (options.highConfidenceOnly) {
-    console.log(chalk.dim('Only executing high-confidence actions\n'));
-  }
+    // Load plan
+    const planObj = await ActionPlan.load(file);
+    const plan = planObj.getData();
 
-  // TODO: Implement in Epic 8
-  displayInfo(
-    'Execute functionality coming in Epic 8',
-    [
-      'Epic 8 will implement:',
-      '  - Safe execution with confirmation prompts',
-      '  - Rollback data capture',
-      '  - Progress tracking',
-      '  - Error handling and retry logic',
-      '  - Execution reports',
-    ]
-  );
+    // Display plan summary
+    console.log(formatHeader(options.dryRun ? '\n🔍 Dry Run Mode\n' : '\n⚠️  Action Plan Execution\n'));
+
+    if (options.dryRun) {
+      console.log(chalk.dim('No changes will be made to HubSpot\n'));
+    } else {
+      displayWarning(
+        'This will modify data in HubSpot!',
+        ['Ensure you have reviewed the plan before proceeding']
+      );
+      console.log();
+    }
+
+    // Show plan summary
+    console.log(formatSection('Plan Details:', [
+      formatKeyValue('Plan ID', plan.id),
+      formatKeyValue('Source Audit', plan.source_audit),
+      formatKeyValue('Created', new Date(plan.created_at).toLocaleString()),
+      formatKeyValue('Total Actions', plan.summary.total_actions.toString()),
+    ].join('\n')));
+
+    // Show actions by confidence
+    console.log(formatSection('Actions by Confidence:', [
+      formatKeyValue('  High', plan.summary.by_confidence.high?.toString() || '0'),
+      formatKeyValue('  Medium', plan.summary.by_confidence.medium?.toString() || '0'),
+      formatKeyValue('  Low', plan.summary.by_confidence.low?.toString() || '0'),
+    ].join('\n')));
+
+    // Show actions by detection method
+    console.log(formatSection('Detection Methods:', [
+      formatKeyValue('  Rule-based', plan.summary.by_detection_method.rule_based.toString()),
+      formatKeyValue('  AI Reasoning', plan.summary.by_detection_method.ai_reasoning.toString()),
+      formatKeyValue('  AI Exploratory', plan.summary.by_detection_method.ai_exploratory.toString()),
+    ].join('\n')));
+
+    // Filter actions if needed
+    let actionsToExecute = plan.actions;
+    if (options.highConfidenceOnly) {
+      actionsToExecute = planObj.getActions({ confidence: ['high'] });
+      console.log(chalk.yellow(`\n⚠️  Executing only high-confidence actions (${actionsToExecute.length}/${plan.actions.length})\n`));
+    }
+
+    if (actionsToExecute.length === 0) {
+      displayInfo('No actions to execute', []);
+      return;
+    }
+
+    // Count non-reversible actions
+    const nonReversibleActions = actionsToExecute.filter(a => !a.reversible);
+    if (nonReversibleActions.length > 0) {
+      displayWarning(
+        `${nonReversibleActions.length} non-reversible actions`,
+        [
+          'These actions CANNOT be undone:',
+          ...nonReversibleActions.map(a => `  - ${a.change.description} (${a.type})`),
+        ]
+      );
+      console.log();
+    }
+
+    // Show AI-generated actions if any
+    const aiActions = actionsToExecute.filter(a => a.detection_method !== 'rule');
+    if (aiActions.length > 0) {
+      console.log(formatSection('AI-Generated Actions:', [
+        chalk.dim(`${aiActions.length} actions were generated by AI analysis`),
+        chalk.dim('Review AI reasoning in plan file for details'),
+      ].join('\n')));
+      console.log();
+    }
+
+    // Confirmation prompt
+    if (!options.dryRun) {
+      const { proceed } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'proceed',
+          message: `Execute ${actionsToExecute.length} actions?`,
+          default: false,
+        },
+      ]);
+
+      if (!proceed) {
+        console.log(chalk.yellow('\n✗ Execution cancelled\n'));
+        return;
+      }
+
+      // Extra confirmation for non-reversible actions
+      if (nonReversibleActions.length > 0) {
+        const { confirmIrreversible } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'confirmIrreversible',
+            message: `Type "EXECUTE" to confirm ${nonReversibleActions.length} non-reversible actions:`,
+          },
+        ]);
+
+        if (confirmIrreversible !== 'EXECUTE') {
+          console.log(chalk.yellow('\n✗ Execution cancelled\n'));
+          return;
+        }
+      }
+    }
+
+    // Initialize HubSpot service
+    const hubspot = await HubSpotService.fromConfig(config);
+
+    // Create executor
+    const executor = new Executor(hubspot, config, {
+      dryRun: options.dryRun,
+      continueOnError: true,
+    });
+
+    // Set up progress tracking
+    let spinner: Ora | null = startProgress({
+      text: `${options.dryRun ? 'Simulating' : 'Executing'} actions...`,
+      color: 'cyan',
+    });
+
+    const progressCallback = (p: ExecutionProgress) => {
+      if (spinner) {
+        const percent = Math.round((p.completed / p.total) * 100);
+        spinner.text = `${options.dryRun ? 'Simulating' : 'Executing'} actions (${p.completed}/${p.total}) ${percent}%`;
+      }
+    };
+
+    // Execute
+    const result = await executor.execute(file, progressCallback);
+
+    // Complete progress
+    if (spinner) {
+      if (result.status === 'completed') {
+        succeedProgress(spinner, `${options.dryRun ? 'Simulation' : 'Execution'} completed successfully`);
+      } else if (result.status === 'partially_completed') {
+        warnProgress(spinner, `${options.dryRun ? 'Simulation' : 'Execution'} partially completed`);
+      } else {
+        failProgress(spinner, `${options.dryRun ? 'Simulation' : 'Execution'} failed`);
+      }
+      spinner = null;
+    }
+
+    // Display results
+    const successColor = result.results.successful > 0 ? chalk.green : chalk.dim;
+    const failureColor = result.results.failed > 0 ? chalk.red : chalk.dim;
+
+    console.log(formatSection('\nResults:', [
+      formatKeyValue('  Successful', successColor(result.results.successful.toString())),
+      formatKeyValue('  Failed', failureColor(result.results.failed.toString())),
+      formatKeyValue('  Skipped', result.results.skipped.toString()),
+      result.results.non_reversible > 0
+        ? formatKeyValue('  Non-reversible', chalk.yellow(result.results.non_reversible.toString()))
+        : '',
+    ].filter(Boolean).join('\n')));
+
+    if (!options.dryRun) {
+      console.log(formatSection('\nExecution Details:', [
+        formatKeyValue('Execution ID', result.id),
+        formatKeyValue('Status', result.status),
+        formatKeyValue('Started', new Date(result.executed_at).toLocaleString()),
+        formatKeyValue('Completed', result.completed_at ? new Date(result.completed_at).toLocaleString() : 'N/A'),
+      ].join('\n')));
+
+      // Show rollback info if any reversible actions succeeded
+      const reversibleSuccesses = result.actions.filter(
+        a => a.status === 'success' && a.is_reversible && a.rollback_data
+      );
+      if (reversibleSuccesses.length > 0) {
+        displaySuccess(
+          'Rollback data captured',
+          [
+            `${reversibleSuccesses.length} actions can be rolled back`,
+            `To rollback: hubspot-audit rollback ${result.id}`,
+          ]
+        );
+      }
+
+      if (result.results.non_reversible > 0) {
+        displayWarning(
+          `${result.results.non_reversible} non-reversible actions executed`,
+          ['These changes cannot be automatically undone']
+        );
+      }
+    }
+
+    console.log();
+  } catch (error) {
+    logger.error({ error, file }, 'Execution failed');
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    displayError(errorObj);
+    process.exit(1);
+  }
 }
 
 /**
@@ -62,28 +242,99 @@ export async function rollbackExecution(
 ): Promise<void> {
   logger.info({ executionId, options }, 'Rolling back execution');
 
-  console.log(chalk.bold(`\n⏮️  Rolling back execution: ${executionId}\n`));
+  try {
+    // Load config
+    const configManager = new ConfigManager();
+    const config = await configManager.load(options.config);
 
-  displayWarning(
-    'Rollback will restore previous values',
-    ['This cannot be undone once started.']
-  );
+    // Initialize services
+    const hubspot = await HubSpotService.fromConfig(config);
+    const rollbackManager = new RollbackManager(
+      hubspot,
+      config,
+      config.settings.output_directory
+    );
 
-  // TODO: Implement in Epic 8
-  displayInfo(
-    'Rollback functionality coming in Epic 8',
-    [
-      'Epic 8 will implement:',
-      '  - Restore previous property values',
-      '  - Re-associate records',
-      '  - Reverse list changes',
-      '  - Rollback reports',
-      '',
-      'Note: Some operations cannot be rolled back:',
-      '  - Merged contacts (HubSpot limitation)',
-      '  - Deleted records',
-    ]
-  );
+    // Check if rollback is possible
+    const canRollback = await rollbackManager.canRollback(executionId);
+
+    console.log(formatHeader('\n⏮️  Rollback Execution\n'));
+
+    console.log(formatSection('Execution ID:', executionId));
+    console.log();
+
+    if (!canRollback.canRollback) {
+      const errorObj = new Error(canRollback.reason || 'Cannot rollback this execution');
+      displayError(errorObj);
+      return;
+    }
+
+    // Show rollback info
+    console.log(formatSection('Rollback Summary:', [
+      formatKeyValue('Reversible actions', canRollback.reversibleCount.toString()),
+      formatKeyValue('Non-reversible actions', canRollback.nonReversibleCount.toString()),
+    ].join('\n')));
+
+    if (canRollback.nonReversibleCount > 0) {
+      displayWarning(
+        `${canRollback.nonReversibleCount} actions cannot be rolled back`,
+        ['These changes will remain in HubSpot']
+      );
+      console.log();
+    }
+
+    // Confirmation
+    const { proceed } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'proceed',
+        message: `Rollback ${canRollback.reversibleCount} actions?`,
+        default: false,
+      },
+    ]);
+
+    if (!proceed) {
+      console.log(chalk.yellow('\n✗ Rollback cancelled\n'));
+      return;
+    }
+
+    // Perform rollback
+    const spinner = startProgress({ text: 'Rolling back actions...', color: 'cyan' });
+
+    const result = await rollbackManager.rollback(executionId);
+
+    succeedProgress(spinner, 'Rollback completed');
+
+    // Display results
+    const successColor = result.rolled_back > 0 ? chalk.green : chalk.dim;
+    const failureColor = result.failed > 0 ? chalk.red : chalk.dim;
+
+    console.log(formatSection('\nResults:', [
+      formatKeyValue('  Rolled back', successColor(result.rolled_back.toString())),
+      formatKeyValue('  Failed', failureColor(result.failed.toString())),
+      formatKeyValue('  Non-reversible', result.non_reversible.toString()),
+    ].join('\n')));
+
+    if (result.errors.length > 0) {
+      console.log(formatSection('\nErrors:', [
+        ...result.errors.map(e => `  ${chalk.red('✗')} ${e.action_id}: ${e.error}`),
+      ].join('\n')));
+    }
+
+    console.log();
+
+    if (result.rolled_back > 0) {
+      displaySuccess(
+        'Rollback successful',
+        [`${result.rolled_back} actions reverted to their original state`]
+      );
+    }
+  } catch (error) {
+    logger.error({ error, executionId }, 'Rollback failed');
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    displayError(errorObj);
+    process.exit(1);
+  }
 }
 
 /**
@@ -96,20 +347,67 @@ export async function listExecutions(options: {
 }): Promise<void> {
   logger.info({ options }, 'Listing executions');
 
-  console.log(chalk.bold('\n📋 Recent Executions\n'));
+  try {
+    // Load config
+    const configManager = new ConfigManager();
+    const config = await configManager.load(options.config);
 
-  // TODO: Implement in Epic 8
-  displayInfo(
-    'Execution history coming in Epic 8',
-    [
-      'Will show:',
-      '  - Execution ID and timestamp',
-      '  - Plan file used',
-      '  - Status (success, partial, failed)',
-      '  - Number of actions executed',
-      '  - Rollback availability',
-    ]
-  );
+    // Initialize services (only need RollbackManager for listing)
+    const hubspot = await HubSpotService.fromConfig(config);
+    const rollbackManager = new RollbackManager(
+      hubspot,
+      config,
+      config.settings.output_directory
+    );
+
+    // Get executions
+    const executions = await rollbackManager.listExecutions();
+
+    if (options.json) {
+      console.log(JSON.stringify(executions, null, 2));
+      return;
+    }
+
+    console.log(formatHeader('\n📋 Recent Executions\n'));
+
+    if (executions.length === 0) {
+      displayInfo('No executions found', ['Run an audit and execute a plan to see executions here']);
+      return;
+    }
+
+    // Display each execution
+    for (const exec of executions) {
+      const statusColor =
+        exec.status === 'completed' ? 'green' :
+        exec.status === 'partially_completed' ? 'yellow' :
+        exec.status === 'failed' ? 'red' : 'gray';
+
+      console.log(chalk.bold(`\n${exec.id}`));
+      console.log(formatSection('', [
+        formatKeyValue('  Status', chalk[statusColor](exec.status)),
+        formatKeyValue('  Executed', new Date(exec.executed_at).toLocaleString()),
+        formatKeyValue('  Plan', exec.plan_id),
+        formatKeyValue('  Successful', exec.results.successful.toString()),
+        formatKeyValue('  Failed', exec.results.failed > 0 ? chalk.red(exec.results.failed.toString()) : '0'),
+        formatKeyValue('  Non-reversible', exec.results.non_reversible.toString()),
+      ].join('\n')));
+
+      // Show rollback status
+      const canRollback = await rollbackManager.canRollback(exec.id);
+      if (canRollback.canRollback) {
+        console.log(chalk.dim(`  Can rollback ${canRollback.reversibleCount} actions`));
+      } else if (canRollback.nonReversibleCount > 0) {
+        console.log(chalk.dim(`  All actions are non-reversible`));
+      }
+    }
+
+    console.log();
+  } catch (error) {
+    logger.error({ error }, 'Failed to list executions');
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    displayError(errorObj);
+    process.exit(1);
+  }
 }
 
 /**
@@ -130,18 +428,19 @@ export function getExecuteInfo(): void {
   ].join('\n')));
 
   console.log(formatSection('Examples:', [
-    '  hubspot-audit execute plan.yaml --dry-run',
-    '  hubspot-audit execute plan.yaml --high-confidence-only',
+    '  hubspot-audit execute plan.json --dry-run',
+    '  hubspot-audit execute plan.json --high-confidence-only',
     '  hubspot-audit rollback exec-2024-01-15-abc123',
     '  hubspot-audit executions list',
   ].join('\n')));
 
   console.log(formatSection('Safety Features:', [
     '  • Confirmation prompts before any changes',
+    '  • Extra confirmation for non-reversible actions',
     '  • Dry-run mode to preview actions',
     '  • High-confidence filter for safer execution',
     '  • Automatic rollback data capture',
-    '  • Detailed execution logs',
+    '  • Detailed execution logs and history',
   ].join('\n')));
 
   console.log();
