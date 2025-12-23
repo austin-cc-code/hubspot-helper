@@ -18,6 +18,25 @@ export const anthropicConfigSchema = z.object({
     .enum(['claude-sonnet-4-20250514', 'claude-3-haiku-20240307'])
     .optional()
     .default('claude-sonnet-4-20250514'),
+
+  // Token limits
+  max_tokens_per_request: z.number().int().positive().default(4096),
+  max_thinking_tokens: z.number().int().positive().default(4000),
+
+  // Agentic capabilities
+  enable_extended_thinking: z.boolean().default(true),
+  enable_tool_use: z.boolean().default(true),
+  enable_multi_turn: z.boolean().default(true),
+  max_tool_calls: z.number().int().positive().default(5),
+  max_conversation_turns: z.number().int().positive().default(2),
+
+  // Budget controls
+  monthly_budget_usd: z.number().positive().optional(),
+  fallback_to_rules_only: z.boolean().default(true),
+
+  // Reliability
+  max_retries: z.number().int().nonnegative().default(3),
+  timeout_ms: z.number().int().positive().default(60000),
 });
 
 // Company context schema

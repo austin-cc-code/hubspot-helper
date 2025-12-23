@@ -10,6 +10,16 @@ export const defaultConfig: Omit<Config, 'company'> = {
   },
   anthropic: {
     model: 'claude-sonnet-4-20250514',
+    max_tokens_per_request: 4096,
+    max_thinking_tokens: 4000,
+    enable_extended_thinking: true,
+    enable_tool_use: true,
+    enable_multi_turn: true,
+    max_tool_calls: 5,
+    max_conversation_turns: 2,
+    fallback_to_rules_only: true,
+    max_retries: 3,
+    timeout_ms: 60000,
   },
   icp: {
     company_sizes: [],

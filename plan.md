@@ -1115,6 +1115,99 @@ Epic 5 is the **foundation for all AI-powered audits**. By properly implementing
 5. **Establish the pattern** - Future audits inherit these capabilities automatically
 6. **No frameworks needed** - All native Claude API features, no external dependencies
 
+**Status**: ✅ **COMPLETE** (2025-12-23)
+
+**Completion Notes:**
+- **ClaudeService Implementation** (`src/services/ClaudeService.ts`, 430 lines):
+  - Full service class wrapping Anthropic SDK with native agentic capabilities
+  - Four analysis methods: `analyzeSimple()`, `analyzeWithReasoning()`, `analyzeWithExploration()`, `analyzeWithIteration()`
+  - Mode selection logic: `selectAnalysisMode()` decides which mode based on context
+  - Cost estimation: `estimateCost()` calculates cost including thinking tokens
+  - Usage tracking: Full token tracking (input, output, thinking) by operation and mode
+  - Budget enforcement: Monthly spending caps with `monthlyBudgetUsd` option
+  - Factory method: `fromConfig()` creates service from app config
+  - Extended thinking support with configurable token budget
+  - Tool use support for structured JSON output
+  - Multi-turn conversation support (up to 2 turns by default)
+  - Retry logic with exponential backoff (3 retries default)
+  - Fallback to rules-only mode when API unavailable
+
+- **Type System** (`src/types/claude.ts`, 98 lines):
+  - Complete TypeScript types for all agentic features
+  - `AnalysisMode` type: simple | reasoning | exploratory | iterative
+  - `ClaudeConfig` interface with all agentic settings
+  - `UsageStats` and `OperationStats` for comprehensive tracking
+  - `CostEstimate` for budget calculations
+  - `AnalysisContext` for mode selection decisions
+  - Pricing constants for Claude Sonnet 4 and Haiku ($3/$15/$3 vs $0.25/$1.25/$0.25 per MTok)
+
+- **Tool Schemas** (`src/services/tools.ts`, 208 lines):
+  - Tool definitions for structured JSON output via tool_use pattern
+  - `reportDataQualityIssuesTool` - Reports data quality issues with severity and confidence
+  - `reportDuplicatesTool` - Reports duplicate contacts with merge recommendations
+  - `reportPropertyAnalysisTool` - Reports property usage and recommendations
+  - `reportAnalysisSummaryTool` - General analysis summaries
+  - Helper functions: `getDataQualityTools()`, `getDuplicateAnalysisTools()`, `getPropertyAnalysisTools()`
+
+- **Prompt Templates** (`src/services/prompts.ts`, 216 lines):
+  - Context-aware prompt builders for each analysis type
+  - `buildSystemPrompt()` - System prompt with company context and ICP
+  - `buildDataQualityPrompt()` - Prompts for data quality analysis
+  - `buildDuplicateDetectionPrompt()` - Prompts for duplicate detection
+  - `buildPropertyAnalysisPrompt()` - Prompts for property usage analysis
+  - `buildExploratoryPrompt()` - General exploratory analysis
+  - `buildFollowUpPrompt()` - Iterative follow-up questions
+  - `buildInvestigationPrompt()` - Specific issue investigation
+  - All prompts include business context, ICP, and data quality standards
+
+- **Configuration Updates**:
+  - Extended `anthropicConfigSchema` in `src/config/schema.ts` with:
+    - Token limits: max_tokens_per_request (4096), max_thinking_tokens (4000)
+    - Agentic flags: enable_extended_thinking, enable_tool_use, enable_multi_turn
+    - Limits: max_tool_calls (5), max_conversation_turns (2)
+    - Budget: monthly_budget_usd (optional), fallback_to_rules_only (true)
+    - Reliability: max_retries (3), timeout_ms (60000)
+  - Updated `defaultConfig` in `src/config/defaults.ts` with all agentic defaults
+  - ClaudeService.fromConfig() reads all config fields properly
+
+- **Testing** (`tests/unit/ClaudeService.test.ts`, 329 lines):
+  - 16 unit tests covering all ClaudeService functionality
+  - Constructor and initialization
+  - Factory method fromConfig() with validation
+  - Mode selection logic for all context types
+  - Cost estimation for Sonnet 4 and Haiku
+  - Usage stats tracking
+  - Reset functionality
+  - All tests passing with 100% coverage of public API
+
+- **Build & Tests**:
+  - All TypeScript compiles successfully
+  - All 88 tests passing (72 existing + 16 new)
+  - No regressions in existing functionality
+
+**Key Features Implemented:**
+- ✅ Analysis modes: simple, reasoning, exploratory, iterative
+- ✅ Extended thinking with configurable token budgets
+- ✅ Tool use for structured JSON output (not string parsing)
+- ✅ Multi-turn conversations (max 2 turns default)
+- ✅ Cost tracking including thinking tokens and tool calls
+- ✅ Budget enforcement with monthly spending caps
+- ✅ Mode selection logic for context-aware analysis
+- ✅ Comprehensive prompt templates with business context
+- ✅ Fallback to rules-only mode
+- ✅ Factory pattern for easy initialization from config
+
+**Notes:**
+- Extended thinking is charged at input token rates ($3/MTok for Sonnet 4)
+- Mode selection strategy balances cost vs analysis quality
+- Simple mode (tool use only) is baseline cost
+- Reasoning mode adds ~50% cost (thinking tokens)
+- Exploratory mode adds ~100% cost (thinking + tools)
+- Iterative mode adds ~150% cost (thinking + tools + multi-turn)
+- All modes use tool_use pattern for reliable JSON output
+- No string parsing or regex extraction of JSON
+- Budget controls prevent runaway costs
+
 ---
 
 ### Epic 6: Data Quality Audit
