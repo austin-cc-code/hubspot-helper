@@ -1419,20 +1419,82 @@ interface DataQualityConfig {
 10. Write comprehensive tests with fixture data covering both phases
 
 **Acceptance Criteria:**
-- [ ] Rule-based checks detect all obvious issues (missing fields, invalid formats, stale data)
-- [ ] Rule-based issues have HIGH confidence automatically
-- [ ] Ambiguous cases are correctly identified and routed to appropriate AI mode
-- [ ] AI analysis uses REASONING mode for pattern detection and ambiguous matching
-- [ ] AI analysis uses EXPLORATORY mode for context-dependent validation
-- [ ] **NEW:** Extended thinking is captured and summarized in results
-- [ ] **NEW:** Data exploration tools allow Claude to investigate related records
-- [ ] **NEW:** Cost tracking shows breakdown by detection method
-- [ ] **NEW:** AI analysis is skipped if cost budget exceeded
-- [ ] **NEW:** Results clearly distinguish rule-based vs AI-detected issues
-- [ ] Claude provides insights with reasoning captured
-- [ ] Performance: 1000 contacts analyzed in <30s (rule-based), AI analysis time varies by ambiguous case count
+- [x] Rule-based checks detect all obvious issues (missing fields, invalid formats, stale data)
+- [x] Rule-based issues have HIGH confidence automatically
+- [x] Ambiguous cases are correctly identified and routed to appropriate AI mode
+- [x] AI analysis uses REASONING mode for pattern detection and ambiguous matching
+- [x] AI analysis uses EXPLORATORY mode for context-dependent validation
+- [x] **NEW:** Extended thinking is captured and summarized in results
+- [x] **NEW:** Data exploration tools allow Claude to investigate related records
+- [x] **NEW:** Cost tracking shows breakdown by detection method
+- [x] **NEW:** AI analysis is skipped if cost budget exceeded
+- [x] **NEW:** Results clearly distinguish rule-based vs AI-detected issues
+- [x] Claude provides insights with reasoning captured
+- [x] Performance: 1000 contacts analyzed in <30s (rule-based), AI analysis time varies by ambiguous case count
 
 **Estimated Effort**: Large (increased from Medium-Large to account for two-phase architecture)
+
+**Status**: ✅ **COMPLETE** (2025-12-23)
+
+**Completion Notes:**
+- **DataQualityAudit Implementation** (`src/audits/DataQualityAudit.ts`, 890 lines):
+  - Full two-phase analysis system (rule-based + AI)
+  - Phase 1: 6 rule-based validations (missing fields, invalid email/phone/URL, stale contacts, obvious typos)
+  - Phase 2: Ambiguous case identification and AI analysis routing
+  - Ambiguous case types: name typos, semantic anomalies, context-dependent issues
+  - Cost control with configurable thresholds and budgets
+  - Detection method tracking (rule, ai_reasoning, ai_exploratory)
+  - AI insights generation with patterns and recommendations
+
+- **Rule-Based Validations**:
+  - `validateRequiredField()` - Checks for missing required fields from config
+  - `validateEmail()` - Regex-based email format validation
+  - `validatePhone()` - Phone number completeness check (min 10 digits)
+  - `validateUrl()` - URL format validation with URL constructor
+  - `checkStaleContact()` - Activity-based staleness detection (uses last contacted/visit timestamps)
+  - `checkObviousTypos()` - Whitespace and formatting issues detection
+
+- **AI Analysis Integration**:
+  - `analyzeWithReasoning()` - Processes ambiguous typos and semantic anomalies using Claude's reasoning mode
+  - `analyzeWithExploration()` - Context-dependent validation with data exploration tools
+  - Prompt building with company context and business rules
+  - Tool schemas for contact/company exploration (`search_similar_contacts`, `get_contact_company`)
+  - Cost tracking per analysis mode
+  - Budget enforcement prevents overspending
+
+- **Ambiguous Case Identification**:
+  - `checkAmbiguousNameTypos()` - Detects nickname patterns (Jon/John, Mike/Michael, Bob/Robert, etc.)
+  - `checkSemanticAnomalies()` - Flags tech titles in non-tech industries
+  - Suspicious company name detection (test, example, sample, unknown)
+  - Routes cases to appropriate AI mode (reasoning vs exploratory)
+
+- **Cost Control**:
+  - `min_ambiguous_cases_for_ai` threshold (default: 10) - skips AI if below threshold
+  - `max_ambiguous_cases_per_run` cap (default: 100) - limits per-audit cost
+  - `max_ai_cost_per_audit` budget (default: $2.00) - stops when exceeded
+  - Real-time cost tracking from ClaudeService usage stats
+
+- **CLI Integration** (`src/cli/commands/audit.ts`):
+  - Full integration with audit command: `hubspot-audit audit contacts --check=data-quality`
+  - OraProgressReporter for real-time progress display
+  - Results display with detection method breakdown
+  - AI insights and sample issues (verbose mode)
+  - Automatic action plan generation and saving
+  - Plan file saved to configured output directory
+
+- **Testing** (`tests/unit/DataQualityAudit.test.ts`, 9 tests):
+  - All rule-based validations tested (missing fields, invalid formats, typos)
+  - Detection method tracking verified
+  - AI insights generation tested
+  - Cost tracking validated
+  - Result structure conformance tested
+  - All 144 tests passing across entire codebase
+
+- **Configuration**:
+  - `data_quality` config section fully integrated in schema and defaults
+  - All AI analysis toggles configurable
+  - Cost and threshold parameters exposed
+  - Works seamlessly with existing config system
 
 **Rationale for Changes:**
 
