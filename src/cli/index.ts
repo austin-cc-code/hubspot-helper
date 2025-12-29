@@ -212,10 +212,10 @@ program
 program
   .command('rollback <execution-id>')
   .description('Rollback a previous execution')
-  .action(async (executionId: string) => {
+  .action(async (executionId: string, options: any) => {
     try {
       const globalOpts = program.opts();
-      await rollbackExecution(executionId, globalOpts);
+      await rollbackExecution(executionId, { ...options, ...globalOpts });
     } catch (error) {
       logger.error({ error }, 'Rollback failed');
       displayError(error as Error, { verbose: program.opts().verbose, json: program.opts().json });

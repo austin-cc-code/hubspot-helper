@@ -169,7 +169,8 @@ export class RollbackManager {
       const recordPath = join(executionsDir, `${executionId}.json`);
 
       // Use ActionPlan's load method (works for any JSON file)
-      const record = await ActionPlan.load(recordPath);
+      const planObj = await ActionPlan.load(recordPath);
+      const record = planObj.getData();
       return record as unknown as ExecutionRecord;
     } catch (error) {
       logger.error({ executionId, error }, 'Failed to load execution record');
