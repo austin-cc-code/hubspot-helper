@@ -80,6 +80,32 @@ export const dataQualityAiConfigSchema = z.object({
   analyze_cross_record_patterns: z.boolean().default(false), // Expensive
 });
 
+// Duplicate detection config schema (Epic 9)
+export const duplicateDetectionConfigSchema = z.object({
+  // Tier 1: Rule-based exact matching (always enabled, free)
+  enable_exact_matching: z.boolean().default(true),
+  exact_email_match: z.boolean().default(true),
+  exact_phone_and_company_match: z.boolean().default(true),
+  exact_name_and_company_match: z.boolean().default(true),
+
+  // Tier 2: Fuzzy matching with AI reasoning
+  enable_fuzzy_matching: z.boolean().default(true),
+  fuzzy_match_threshold: z.number().min(0).max(1).default(0.85), // 85% similar
+  max_fuzzy_pairs_for_ai: z.number().int().positive().default(100),
+
+  // Tier 3: Deep investigation with AI exploration
+  enable_merge_investigation: z.boolean().default(true),
+  max_investigations_per_run: z.number().int().positive().default(20),
+  min_confidence_for_investigation: z.number().min(0).max(1).default(0.5),
+
+  // Overall cost control
+  max_ai_cost_per_audit: z.number().positive().default(5.0), // Higher than data quality
+
+  // Phone normalization
+  normalize_phone_numbers: z.boolean().default(true),
+  default_country_code: z.string().default('US'),
+});
+
 // Rate limit settings schema
 export const rateLimitSettingsSchema = z.object({
   requests_per_10_seconds: z.number().int().positive().default(100),
@@ -109,6 +135,7 @@ export const configSchema = z.object({
   icp: icpSchema.default({}),
   rules: dataQualityRulesSchema.default({}),
   data_quality: dataQualityAiConfigSchema.default({}),
+  duplicate_detection: duplicateDetectionConfigSchema.default({}),
   settings: auditSettingsSchema.default({}),
   security: securitySettingsSchema.default({}),
 });
@@ -125,6 +152,7 @@ export type CompanyContext = z.infer<typeof companyContextSchema>;
 export type IdealCustomerProfile = z.infer<typeof icpSchema>;
 export type DataQualityRules = z.infer<typeof dataQualityRulesSchema>;
 export type DataQualityAiConfig = z.infer<typeof dataQualityAiConfigSchema>;
+export type DuplicateDetectionConfig = z.infer<typeof duplicateDetectionConfigSchema>;
 export type RateLimitSettings = z.infer<typeof rateLimitSettingsSchema>;
 export type AuditSettings = z.infer<typeof auditSettingsSchema>;
 export type SecuritySettings = z.infer<typeof securitySettingsSchema>;

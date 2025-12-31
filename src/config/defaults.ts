@@ -42,6 +42,21 @@ export const defaultConfig: Omit<Config, 'company'> = {
     analyze_semantic_anomalies: true,
     analyze_cross_record_patterns: false,
   },
+  duplicate_detection: {
+    enable_exact_matching: true,
+    exact_email_match: true,
+    exact_phone_and_company_match: true,
+    exact_name_and_company_match: true,
+    enable_fuzzy_matching: true,
+    fuzzy_match_threshold: 0.85,
+    max_fuzzy_pairs_for_ai: 100,
+    enable_merge_investigation: true,
+    max_investigations_per_run: 20,
+    min_confidence_for_investigation: 0.5,
+    max_ai_cost_per_audit: 5.0,
+    normalize_phone_numbers: true,
+    default_country_code: 'US',
+  },
   settings: {
     batch_size: 100,
     rate_limit: {

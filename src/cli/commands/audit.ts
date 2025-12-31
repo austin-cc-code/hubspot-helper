@@ -12,7 +12,7 @@ import { createLogger } from '../../utils/logger.js';
 import { ConfigManager } from '../../config/ConfigManager.js';
 import { HubSpotService } from '../../services/HubSpotService.js';
 import { ClaudeService } from '../../services/ClaudeService.js';
-import { DataQualityAudit } from '../../audits/index.js';
+import { DataQualityAudit, DuplicateDetectionAudit } from '../../audits/index.js';
 import { PlanBuilder, ActionPlan } from '../../actions/index.js';
 import type { ProgressReporter, AuditContext, AuditResult } from '../../types/audit.js';
 import type { Config } from '../../types/config.js';
@@ -140,6 +140,14 @@ async function runCheck(
       }
 
     case 'duplicates':
+      if (objectType === 'contacts' || objectType === 'all') {
+        const audit = new DuplicateDetectionAudit();
+        return await audit.run(context);
+      } else {
+        console.log(chalk.yellow(`\nDuplicate detection is only available for contacts\n`));
+        return null;
+      }
+
     case 'properties':
     case 'lists':
     case 'marketing':
