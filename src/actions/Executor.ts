@@ -345,22 +345,16 @@ export class Executor {
    */
   private async executeMergeContacts(action: Action): Promise<void> {
     // For merge, we expect object_id to be primary and new_value to contain secondary ID
-    // const primaryId = action.target.object_id;
+    const primaryId = action.target.object_id;
     const secondaryId = action.change.new_value as string;
 
     if (!secondaryId) {
       throw new ExecutionError('Missing secondary contact ID for merge', action.id);
     }
 
-    // Note: Merge is not implemented in HubSpotService yet (requires raw HTTP)
-    throw new ExecutionError(
-      'Merge operation not yet implemented (requires HubSpot API enhancement)',
-      action.id
-    );
-
-    // When implemented:
-    // await this.hubspot.mergeContacts(_primaryId, secondaryId);
-    // logger.warn({ actionId: action.id, _primaryId, secondaryId }, 'Merged contacts (NOT REVERSIBLE)');
+    // Execute the merge - this is NOT REVERSIBLE
+    await this.hubspot.mergeContacts(primaryId, secondaryId);
+    logger.warn({ actionId: action.id, primaryId, secondaryId }, 'Merged contacts (NOT REVERSIBLE)');
   }
 
   /**

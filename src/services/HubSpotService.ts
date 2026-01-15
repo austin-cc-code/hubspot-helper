@@ -165,10 +165,16 @@ export class HubSpotService {
     logger.warn({ primaryId, secondaryId }, 'Merging contacts (irreversible)');
 
     await this.executeWithRetry(async () => {
-      // Note: Merge API is not directly available in the typed client
-      // Would need to use raw HTTP client or wait for SDK update
-      logger.warn('Merge API requires direct HTTP call - not yet implemented');
-      throw new Error('Merge operation not yet implemented - requires raw API call');
+      // Use the merge API - secondary contact will be permanently deleted
+      await this.client.crm.contacts.mergeApi.merge({
+        primaryObjectId: primaryId,
+        objectIdToMerge: secondaryId,
+      });
+
+      logger.warn(
+        { primaryId, secondaryId },
+        'Successfully merged contacts - secondary contact deleted'
+      );
     });
   }
 
